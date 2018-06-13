@@ -61,13 +61,21 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
 */    
     // Params: release, start, type
     // type: External, Internal, format
+    // model: readme (default), releasenote
+    String modelDocument = queryParams.getFirst("model");
+    if (!modelDocument) {modelDocument = "readme"};
+    // type: External (default), Internal
     String typeDocument = queryParams.getFirst("type");
+    if (!typeDocument) {typeDocument = "External"};
+	// release
     String release = queryParams.getFirst("release");
+    // format: text (default), html
     String format = queryParams.getFirst("format");
-    String keys = queryParams.getFirst("keys");
-    String filterId = queryParams.getFirst("filterid");
     if (!format) {format = "text"};
-    if (!typeDocument) {typeDocument = ""};
+    // keys: JIRA keys for testing 'X3-111,X3-222,...'
+    String keys = queryParams.getFirst("keys");
+    // filterid: filter id or if null, keep the jql programmed
+    String filterId = queryParams.getFirst("filterid");
     try {
         assert (typeDocument.toLowerCase() == "internal" || typeDocument.toLowerCase() == "external") : "'type' parameter should be Internal ou External";
         assert (release) : "'release' parameter is mandatory";
@@ -82,46 +90,56 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     // Search API syntax
     def API = "/search";
     // JQL query
-    // Project
-
-    String query;
-    if (filterId) {
-    	query = getFilter(filterId);
-    } else {
-        query = "project=X3";
+    String Jql, query;
+    if (modelDocument.toLowerCase() == "readme") {
+        Jql = "project=X3";
         // Issue type
-        query += " AND issuetype in (Bug,'Entry Point')";
+        Jql += " AND issuetype in (Bug,'Entry Point')";
         // Status
-        query += " AND status=Done";
+        Jql += " AND status=Done";
         // Resolution
-        query += " AND resolution in (Done,Fixed)";
+        Jql += " AND resolution in (Done,Fixed)";
         // 
         if (typeDocument.toLowerCase() == "external") {
-            query += " AND 'X3 ReadMe Check'='To be communicated'";
+            Jql += " AND 'X3 ReadMe Check'='To be communicated'";
         }
         // Releases
-        query += " AND fixVersion in versionMatch('"+release+"')";
+        Jql += " AND fixVersion in versionMatch('"+release+"')";
         // JIRA keys (optionnal)
         if (keys) {
-            query += " AND issuekey in ("+keys+")";
+            Jql += " AND issuekey in ("+keys+")";
         }
         // Order
-        query += " ORDER BY 'X3 Product Area' ASC";
+        Jql += " ORDER BY 'X3 Product Area' ASC";
+
+        // fields: X3 Solution Details(15118), X3 Product Area(15522), X3 Maintenances(15112)
+        query = "&fields=summary,customfield_15118,customfield_15522,customfield_15112,issuetype,priority";
+    } else if (modelDocument.toLowerCase() == "releasenote") {
+        Jql = "project=X3";
+        // Issue type
+        Jql += " AND issuetype in (Epic)";
+        // Status
+        Jql += " AND status=Done";
+        // 
+        if (typeDocument.toLowerCase() == "external") {
+            Jql += " AND 'X3 Release Note Check'='To be communicated'";
+        }
+        // Releases
+        Jql += " AND fixVersion in versionMatch('"+release+"')";
+        // JIRA keys (optionnal)
+        if (keys) {
+            Jql += " AND issuekey in ("+keys+")";
+        }
+        // Order
+        Jql += " ORDER BY 'X3 Product Area' ASC";
+
+        // fields: summary, X3 Release Note(14806), X3 Product Area(15522)
+        query = "&fields=summary,customfield_14806,customfield_15522";
     }
-    
-    // Test of use a class for building the query string
-    /*
-    QueryString qs = new QueryString(baseURL, API);
-    qs.add("jql", query);
-    qs.add("fields", "summary,customfield_15118,customfield_15522,customfield_15112,issuetype,priority");
-    if (queryParams.getFirst("start")) {
-    	qs.add("startAt", (String) queryParams.getFirst("start"));
-    }
-    qs.add("maxResults", "1000");
-    return Response.ok(qs.toString(), "text/plain").build(); */
-    
-    // fields (mandatory)
-    query += "&fields=summary,customfield_15118,customfield_15522,customfield_15112,issuetype,priority";
+    if (filterId) {
+        // Get the query from the filter given by parameter
+    	Jql = getFilter(filterId);
+    }    
     // start (optionnal)
     if (queryParams.getFirst("start")) {
     	query += "&startAt="+queryParams.getFirst("start");
@@ -150,7 +168,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
 	}
 */
     
-	URL url = new java.net.URL(baseURL + API + "?" + "jql="+removedSpaces(query));
+	URL url = new java.net.URL(baseURL + API + "?" + "jql="+removedSpaces(Jql) + query);
 
 	def authString = "INDUSPRD" + ":" + "INDUSPRD";
 	byte[] authEncBytes = Base64.encodeBase64(authString.getBytes());
@@ -188,7 +206,23 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         builder.append(pDocument("Release: " + release, format));
         
         // Body of document
-        String h1, h2, h1Rupture, h2Rupture;
+        // Break fiels definition
+        String h1, h2, h1Rupture, h2Rupture, breakValue;
+        def mapFields, hFields, breakValues;
+        switch (modelDocument.toLowerCase()) {
+            case "readme":
+            	// issuetype
+				hFields = ["issuetype", "customfield_15522"] as List;
+            	mapFields = ["issuetype":"name", "customfield_15522":"value"] as Map;
+            	breakValues = ["issuetype":"", "customfield_15522":""] as Map;
+            	break;
+            case "releasenote":
+            	// X3 Product Area
+				hFields = ["customfield_15522"] as List;
+            	mapFields = ["customfield_15522":"value"] as Map;
+            	breakValues = ["customfield_15522":""] as Map;
+            	break;
+        }
         // https://docs.oracle.com/javase/8/docs/api/java/util/List.html
         List issues = (List) jsonResult.get("issues");
         issues.each {
@@ -197,29 +231,21 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     		Map fields = issue.get("fields");
 
             // Retreive the rupture fields
-            // h1: Issue Type (Bug, Entry Point)
-            String issueTypeValue = ((Map) fields.get("issuetype")).get("name");
-            if (h1Rupture == null || h1Rupture != issueTypeValue) {
-            	// Write the rupture fields
-                if (issueTypeValue == "Bug") {
-                    h1 = "BugFixes";
-                } else if (issueTypeValue == "Entry Point") {
-                    h1 = "Entry Points";
+            hFields.each {
+            	breakValue = ((Map) fields.get(it)).get(mapFields[it]);
+                if (breakValues[it] == null || breakValues[it] != breakValue) {
+                    // Case of issuetype value
+                    if (it == "issuetype") {
+                        if (breakValue == "Bug") {
+                            breakValue = "BugFixes";
+                        } else if (breakValue == "Entry Point") {
+                            breakValue = "Entry Points";
+                        }
+                    }
+                    // Write the rupture fields
+                    builder.append(h1Document(breakValue, format));
+                    breakValues[it] = breakValue;
                 }
-            	builder.append(h1Document(h1, format));
-            	h1Rupture = issueTypeValue;
-            }
-            // h2: X3 Product Area (optionnal)
-            String productAreaValue;
-            Map productArea = (Map) fields.get("customfield_15522");
-            if (productArea && !productArea.isEmpty()) {
-                productAreaValue = productArea.get("value");
-            }
-            if (h2Rupture == null || h2Rupture != productAreaValue) {
-            	// Write the rupture fields
-                h2 = productAreaValue;
-            	builder.append(h2Document(h2, format));
-            	h2Rupture = productAreaValue;
             }
             // h3: Issue
             if (typeDocument.toLowerCase() == "internal") {
