@@ -193,15 +193,20 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         // Write the text of readme document
         StringWriter builder = new StringWriter();
 		// for html
-		MarkupBuilder markupBuilder = new MarkupBuilder(builder);
-        MarkupBuilder myBuilder = new MarkupBuilder(builder);
+//		MarkupBuilder markupBuilder = new MarkupBuilder(builder);
+//        MarkupBuilder myBuilder = new MarkupBuilder(builder);
 
         // Header of document
         // @see https://docs.oracle.com/javase/7/docs/api/javax/swing/JEditorPane.html
-        builder.append(headerDocument(format));
-
-        builder.append(pDocument("Content: Bug Fixes and Entry Points", format));
-        builder.append(pDocument("Product: Sage X3 & Platform", format));
+        switch (modelDocument.toLowerCase()) {
+            case "readme":
+                builder.append(headerDocument(format));
+                builder.append(pDocument("Content: Bug Fixes and Entry Points", format));
+                builder.append(pDocument("Product: Sage X3 & Platform", format));
+            	break;
+            case "releasenote":
+            	break;
+        }
 
         builder.append(pDocument("Release: " + release, format));
         
@@ -231,11 +236,11 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     		Map fields = issue.get("fields");
 
             // Retreive the rupture fields
-            hFields.each {
-            	breakValue = ((Map) fields.get(it)).get(mapFields[it]);
-                if (breakValues[it] == null || breakValues[it] != breakValue) {
+            hFields.eachWithIndex { hField, idx ->
+            	breakValue = ((Map) fields.get(hField)).get(mapFields[hField]);
+                if (breakValues[hField] == null || breakValues[hField] != breakValue) {
                     // Case of issuetype value
-                    if (it == "issuetype") {
+                    if (hField == "issuetype") {
                         if (breakValue == "Bug") {
                             breakValue = "BugFixes";
                         } else if (breakValue == "Entry Point") {
@@ -243,8 +248,8 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
                         }
                     }
                     // Write the rupture fields
-                    builder.append(h1Document(breakValue, format));
-                    breakValues[it] = breakValue;
+                    builder.append(hDocument(breakValue, idx+1, format));
+                    breakValues[hField] = breakValue;
                 }
             }
             // h3: Issue
@@ -254,8 +259,16 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
 
             // Write the body issue
             //builder.append(getIssueReadme(it, typeDocument, format));
-        	builder.append(getIssueReadme(key, fields, typeDocument, format));
+            switch (modelDocument.toLowerCase()) {
+                case "readme":
+        			builder.append(getIssueReadme(key, fields, typeDocument, format));
+                	break;
+                case "releasenote":
+        			builder.append(getIssueReleasenote(key, fields, typeDocument, format));
+                	break;
+            }
 		};
+
         // Footer of document
         builder.append(footerDocument(format));
 
@@ -269,7 +282,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             	break;
         }
 
-		/*
+		/* good example of code with html format
         // StringWriter writer1 = new StringWriter();
         myBuilder.a(href: "http://www.example.com", "bla bla bla")
         myBuilder.p("bla bla bla");
@@ -378,11 +391,24 @@ public static String getIssueReadme(String key, Map fields, String typeDocument,
             builder.append(pDocument(solution, format));
         }
     }
-    if (format == "html") {
-  		return builder.toString();
-    } else {
-  		return builder.toString();
+
+    return builder.toString();
+}
+
+public static String getIssueReleasenote(String key, Map fields, String typeDocument, String format) {
+    StringWriter builder = new StringWriter();
+    MarkupBuilder markupBuilder = new groovy.xml.MarkupBuilder(builder);
+
+    if (fields) {
+        // summary
+        String summary = fields.get("summary");
+        // X3 Release Note
+        String releaseNote = fields.get("customfield_14806");
+
+        builder.append(pDocument(releaseNote, format));
     }
+
+    return builder.toString();
 }
 
 public static String headerDocument(String format) {
@@ -418,6 +444,40 @@ public static String pDocument(String paragraph, String format) {
     		StringWriter writer = new StringWriter();
         	MarkupBuilder newBuilder = new MarkupBuilder(writer);
         	newBuilder.p(builder.build());
+        	return writer.toString();
+    }
+}
+
+public static String hDocument(String h, int level, String format) {
+	ReadmeBuilder builder = new ReadmeBuilder();
+
+    switch (format) {
+        case "text":
+        	String carUnderline;
+            switch (level) {
+				case 1: 
+                	carUnderline = "*";
+                	break;
+				case 2:
+                	carUnderline = "=";
+                	break;
+            }
+    		builder.addLF();
+    		builder.addLine(repeat(carUnderline, h.length()));
+    		builder.addLine(h);
+    		builder.addLine(repeat(carUnderline, h.length()));
+  			return builder.build();
+        case "html":
+    		StringWriter writer = new StringWriter();
+        	MarkupBuilder newBuilder = new MarkupBuilder(writer);
+            switch (level) {
+				case 1: 
+        			newBuilder.h1(h);
+                	break;
+				case 2: 
+        			newBuilder.h2(h);
+                	break;
+            }
         	return writer.toString();
     }
 }
