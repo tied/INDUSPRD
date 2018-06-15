@@ -15,6 +15,7 @@ import org.apache.commons.codec.binary.Base64;
 import groovy.json.JsonBuilder;
 import groovy.transform.BaseScript;
 import groovy.json.JsonOutput;
+import groovy.json.JsonSlurper;
 import groovy.xml.MarkupBuilder;
 import groovyx.net.http.RESTClient;
 
@@ -76,6 +77,9 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     String keys = queryParams.getFirst("keys");
     // filterid: filter id or if null, keep the jql programmed
     String filterId = queryParams.getFirst("filterid");
+    // component: Syracuse for Syracuse fixing
+    String component = queryParams.getFirst("component");
+    if (!component) {component = "X3"};
     try {
         assert (typeDocument.toLowerCase() == "internal" || typeDocument.toLowerCase() == "external") : "'type' parameter should be Internal ou External";
         assert (release) : "'release' parameter is mandatory";
@@ -112,8 +116,8 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         // Order
         Jql += " ORDER BY 'X3 Product Area' ASC";
 
-        // fields: X3 Solution Details(15118), X3 Product Area(15522), X3 Maintenances(15112)
-        query = "&fields=summary,customfield_15118,customfield_15522,customfield_15112,issuetype,priority";
+        // fields: X3 Solution Details(15118), X3 Product Area(15522), X3 Maintenances(15112), X3 Regression(15110)
+        query = "&fields=summary,customfield_15118,customfield_15522,customfield_15112,issuetype,priority,customfield_15110";
     } else if (modelDocument.toLowerCase() == "releasenote") {
         Jql = "project=X3";
         // Issue type
@@ -212,22 +216,25 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         
         // Body of document
         // Break fiels definition
-        String h1, h2, h1Rupture, h2Rupture, breakValue;
-        def mapFields, hFields, breakValues;
+        String fieldValue, breakValue;
+        Map breakMap = (Map) jsonSlurper.parseText('{"breakFields":[]}');
+        List breakFields = (List) breakMap.getAt("breakFields");
         switch (modelDocument.toLowerCase()) {
             case "readme":
             	// issuetype
-				hFields = ["issuetype", "customfield_15522"] as List;
-            	mapFields = ["issuetype":"name", "customfield_15522":"value"] as Map;
-            	breakValues = ["issuetype":"", "customfield_15522":""] as Map;
+            	breakFields.push((Map) jsonSlurper.parseText('{"field":"issuetype","subfield":{"name":"name","breakValue":""}}'));
+            	// For Syracuse, break only
+            	if (component.toLowerCase() != "syracuse") {
+            		// X3 Product Area
+					breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15522","subfield":{"name":"value","breakValue":""}}'));
+                }
             	break;
             case "releasenote":
             	// X3 Product Area
-				hFields = ["customfield_15522"] as List;
-            	mapFields = ["customfield_15522":"value"] as Map;
-            	breakValues = ["customfield_15522":""] as Map;
+            	breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15522","subfield":{"name":"value","breakValue":""}}'));
             	break;
         }
+
         // https://docs.oracle.com/javase/8/docs/api/java/util/List.html
         List issues = (List) jsonResult.get("issues");
         issues.each {
@@ -235,21 +242,23 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     		String key = issue.get("key");
     		Map fields = issue.get("fields");
 
-            // Retreive the rupture fields
-            hFields.eachWithIndex { hField, idx ->
-            	breakValue = ((Map) fields.get(hField)).get(mapFields[hField]);
-                if (breakValues[hField] == null || breakValues[hField] != breakValue) {
+            // Retreive the break fields
+            breakFields.eachWithIndex {breakField, idx ->
+                fieldValue = ((Map) fields.get(breakField.getAt("field"))).get(((Map) breakField.getAt("subfield")).getAt("name"));
+                breakValue = ((Map) breakField.getAt("subfield")).getAt("breakValue");
+                if (fieldValue != breakValue) {
                     // Case of issuetype value
-                    if (hField == "issuetype") {
-                        if (breakValue == "Bug") {
-                            breakValue = "BugFixes";
-                        } else if (breakValue == "Entry Point") {
-                            breakValue = "Entry Points";
+                    if (breakField.getAt("field") == "issuetype") {
+                        if (fieldValue == "Bug") {
+                            fieldValue = "BugFixes";
+                        } else if (fieldValue == "Entry Point") {
+                            fieldValue = "Entry Points";
                         }
                     }
-                    // Write the rupture fields
-                    builder.append(hDocument(breakValue, idx+1, format));
-                    breakValues[hField] = breakValue;
+                    // Write the break field
+                    builder.append(hDocument(fieldValue, idx+1, format));
+                    
+                    ((Map) breakField.getAt("subfield")).putAt("breakValue", fieldValue);
                 }
             }
             // h3: Issue
@@ -261,10 +270,10 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             //builder.append(getIssueReadme(it, typeDocument, format));
             switch (modelDocument.toLowerCase()) {
                 case "readme":
-        			builder.append(getIssueReadme(key, fields, typeDocument, format));
+        			builder.append(getBodyReadme(key, fields, typeDocument, format));
                 	break;
                 case "releasenote":
-        			builder.append(getIssueReleasenote(key, fields, typeDocument, format));
+        			builder.append(getBodyReleasenote(key, fields, typeDocument, format));
                 	break;
             }
 		};
@@ -335,7 +344,7 @@ public static String getBullet(priority) {
     return priorities[priority];
 }
 
-public static String getIssueReadme(String key, Map fields, String typeDocument, String format) {
+public static String getBodyReadme(String key, Map fields, String typeDocument, String format) {
     StringBuilder builder = new StringBuilder();
     def markupBuilder, writer;
     if (format == "html") {
@@ -395,7 +404,7 @@ public static String getIssueReadme(String key, Map fields, String typeDocument,
     return builder.toString();
 }
 
-public static String getIssueReleasenote(String key, Map fields, String typeDocument, String format) {
+public static String getBodyReleasenote(String key, Map fields, String typeDocument, String format) {
     StringWriter builder = new StringWriter();
     MarkupBuilder markupBuilder = new groovy.xml.MarkupBuilder(builder);
 
