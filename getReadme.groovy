@@ -35,7 +35,7 @@ import static java.util.stream.Collectors.joining;
 
 @BaseScript CustomEndpointDelegate delegate
 
-getReadme(httpMethod: "GET", groups: ["X3 Users"]) { MultivaluedMap queryParams ->
+getReport(httpMethod: "GET", groups: ["X3 Users"]) { MultivaluedMap queryParams ->
     // Response
   	MediaType mediaType = MediaType.TEXT_PLAIN_TYPE; // or "text/plain"
 	ResponseBuilder responseBuilder;
@@ -63,8 +63,8 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     // Params: release, start, type
     // type: External, Internal, format
     // model: readme (default), releasenote
-    String modelDocument = queryParams.getFirst("model");
-    if (!modelDocument) {modelDocument = "readme"};
+    String report = queryParams.getFirst("report");
+    if (!report) {report = "readme"};
     // type: External (default), Internal
     String typeDocument = queryParams.getFirst("type");
     if (!typeDocument) {typeDocument = "External"};
@@ -80,10 +80,15 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     // component: Syracuse for Syracuse fixing
     String component = queryParams.getFirst("component");
     if (!component) {component = "X3"};
+    // header: Yes(default), No
+    String header = queryParams.getFirst("header");
+    if (!header) {header = "yes"};
     try {
+        assert (report.toLowerCase() == "readme" || report.toLowerCase() == "releasenote") : "'model' parameter should be Readme ou Releasenote";
         assert (typeDocument.toLowerCase() == "internal" || typeDocument.toLowerCase() == "external") : "'type' parameter should be Internal ou External";
         assert (release) : "'release' parameter is mandatory";
         assert (format.toLowerCase() == "text" || format.toLowerCase() == "html") : "'format' parameter should be text ou html";
+        assert (component.toLowerCase() == "x3" || component.toLowerCase() == "syracuse") : "if given, 'component' parameter should be set to Syracuse";
     } catch (AssertionError e) {
         responseBuilder = Response.status(Status.NOT_FOUND).type("text/plain").entity("Something is wrong: " + e.getMessage());
         return responseBuilder.build();
@@ -94,9 +99,9 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     // Search API syntax
     def API = "/search";
     // JQL query
-    String Jql, query;
-    if (modelDocument.toLowerCase() == "readme") {
-        Jql = "project=X3";
+    String query;
+	String Jql = "project=X3";
+    if (report.toLowerCase() == "readme") {
         // Issue type
         Jql += " AND issuetype in (Bug,'Entry Point')";
         // Status
@@ -118,8 +123,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
 
         // fields: X3 Solution Details(15118), X3 Product Area(15522), X3 Maintenances(15112), X3 Regression(15110)
         query = "&fields=summary,customfield_15118,customfield_15522,customfield_15112,issuetype,priority,customfield_15110";
-    } else if (modelDocument.toLowerCase() == "releasenote") {
-        Jql = "project=X3";
+    } else if (report.toLowerCase() == "releasenote") {
         // Issue type
         Jql += " AND issuetype in (Epic)";
         // Status
@@ -202,11 +206,24 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
 
         // Header of document
         // @see https://docs.oracle.com/javase/7/docs/api/javax/swing/JEditorPane.html
-        switch (modelDocument.toLowerCase()) {
+        switch (report.toLowerCase()) {
             case "readme":
-                builder.append(headerDocument(format));
-                builder.append(pDocument("Content: Bug Fixes and Entry Points", format));
-                builder.append(pDocument("Product: Sage X3 & Platform", format));
+            	// Header
+            	if (header.toLowerCase() == "yes") {
+                	builder.append(headerDocument(format));
+                }
+            	// Content
+            	String contentTitle = "Content: Bug Fixes"
+                if (component == "X3") {
+					contentTitle += " and Entry Points";
+                }
+                builder.append(pDocument(contentTitle, format));
+            	// Release
+            	builder.append(pDocument("Product: Sage X3", format));
+            	// Component
+                if (component.toLowerCase() == "syracuse") {
+            		builder.append(pDocument("Component: Syracuse", format));
+                }
             	break;
             case "releasenote":
             	break;
@@ -219,7 +236,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         String fieldValue, breakValue;
         Map breakMap = (Map) jsonSlurper.parseText('{"breakFields":[]}');
         List breakFields = (List) breakMap.getAt("breakFields");
-        switch (modelDocument.toLowerCase()) {
+        switch (report.toLowerCase()) {
             case "readme":
             	// issuetype
             	breakFields.push((Map) jsonSlurper.parseText('{"field":"issuetype","subfield":{"name":"name","breakValue":""}}'));
@@ -268,7 +285,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
 
             // Write the body issue
             //builder.append(getIssueReadme(it, typeDocument, format));
-            switch (modelDocument.toLowerCase()) {
+            switch (report.toLowerCase()) {
                 case "readme":
         			builder.append(getBodyReadme(key, fields, typeDocument, format));
                 	break;
@@ -377,18 +394,20 @@ public static String getBodyReadme(String key, Map fields, String typeDocument, 
             }
         }
 
-        // Write issue
+        // Write informations
         if (typeDocument.toLowerCase() == "internal") {
             // format for Internal readme
+            // write the 'summary' field
         	builder.append(pDocument(summary, format));
+            // write the 'X3 Solution details' field
         	builder.append(pDocument("Details: " + solution, format));
-            if (maintenancesVersion && !maintenancesVersion.isEmpty()) {
+            // Add the X3 maintenances numbers
+            if (false && maintenancesVersion && !maintenancesVersion.isEmpty()) {
                 builder.append("Maintenances: ");
                 def pattern = /\[[0-9]*\|/
                 maintenancesVersion.each {
                     def maintenancesNumber = it =~ pattern;
                     maintenancesNumber.each {
-                        // builder.append(it.toString()+",")
         				builder.append(pDocument(it.toString()+",", format));
                     };
                 };
@@ -396,7 +415,9 @@ public static String getBodyReadme(String key, Map fields, String typeDocument, 
         } else {
             // format for External readme
     		def priorities = [Minor:"-", Major:"*", Critical:"^", Blocker:"!"];
+            // write the 'summary' field
         	builder.append(pDocument(priorities[priorityValue] + " $summary [JIRA#$key]", format));
+            // write the 'X3 Solution details' field
             builder.append(pDocument(solution, format));
         }
     }
