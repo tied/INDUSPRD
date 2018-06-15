@@ -80,7 +80,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     // component: Syracuse for Syracuse fixing
     String component = queryParams.getFirst("component");
     if (!component) {component = "X3"};
-    // header: Yes(default), No
+    // header
     String header = queryParams.getFirst("header");
     if (!header) {header = "yes"};
     try {
@@ -113,13 +113,13 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             Jql += " AND 'X3 ReadMe Check'='To be communicated'";
         }
         // Releases
-        Jql += " AND fixVersion in versionMatch('"+release+"')";
+        Jql += " AND fixVersion in versionMatch('^"+release+"')";
         // JIRA keys (optionnal)
         if (keys) {
             Jql += " AND issuekey in ("+keys+")";
         }
         // Order
-        Jql += " ORDER BY 'X3 Product Area' ASC";
+        Jql += " ORDER BY issuetype DESC, 'X3 Product Area' ASC";
 
         // fields: X3 Solution Details(15118), X3 Product Area(15522), X3 Maintenances(15112), X3 Regression(15110)
         query = "&fields=summary,customfield_15118,customfield_15522,customfield_15112,issuetype,priority,customfield_15110";
@@ -133,7 +133,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             Jql += " AND 'X3 Release Note Check'='To be communicated'";
         }
         // Releases
-        Jql += " AND fixVersion in versionMatch('"+release+"')";
+        Jql += " AND fixVersion in versionMatch('^"+release+"')";
         // JIRA keys (optionnal)
         if (keys) {
             Jql += " AND issuekey in ("+keys+")";
@@ -261,9 +261,14 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
 
             // Retreive the break fields
             breakFields.eachWithIndex {breakField, idx ->
-                fieldValue = ((Map) fields.get(breakField.getAt("field"))).get(((Map) breakField.getAt("subfield")).getAt("name"));
-                breakValue = ((Map) breakField.getAt("subfield")).getAt("breakValue");
+                String breakFieldName = breakField.getAt("field");
+                Map breakSubfield = (Map) breakField.getAt("subfield");
+
+                fieldValue = ((Map) fields.get(breakFieldName)).get(breakSubfield.getAt("name"));
+                breakValue = breakSubfield.getAt("breakValue");
                 if (fieldValue != breakValue) {
+                    breakSubfield.putAt("breakValue", fieldValue);
+
                     // Case of issuetype value
                     if (breakField.getAt("field") == "issuetype") {
                         if (fieldValue == "Bug") {
@@ -274,8 +279,6 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
                     }
                     // Write the break field
                     builder.append(hDocument(fieldValue, idx+1, format));
-                    
-                    ((Map) breakField.getAt("subfield")).putAt("breakValue", fieldValue);
                 }
             }
             // h3: Issue
@@ -284,7 +287,6 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             }
 
             // Write the body issue
-            //builder.append(getIssueReadme(it, typeDocument, format));
             switch (report.toLowerCase()) {
                 case "readme":
         			builder.append(getBodyReadme(key, fields, typeDocument, format));
@@ -416,6 +418,7 @@ public static String getBodyReadme(String key, Map fields, String typeDocument, 
             // format for External readme
     		def priorities = [Minor:"-", Major:"*", Critical:"^", Blocker:"!"];
             // write the 'summary' field
+        	builder.append(pDocument("", format));
         	builder.append(pDocument(priorities[priorityValue] + " $summary [JIRA#$key]", format));
             // write the 'X3 Solution details' field
             builder.append(pDocument(solution, format));
