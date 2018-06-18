@@ -200,9 +200,6 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
 
         // Write the text of readme document
         StringWriter builder = new StringWriter();
-		// for html
-//		MarkupBuilder markupBuilder = new MarkupBuilder(builder);
-//        MarkupBuilder myBuilder = new MarkupBuilder(builder);
 
         // Header of document
         // @see https://docs.oracle.com/javase/7/docs/api/javax/swing/JEditorPane.html
@@ -485,8 +482,8 @@ public static String getBodyReleasenote(String key, Map fields, String typeDocum
                 if (type && type.get("inward") == "is part of") {
                     Map inwardIssue = (Map) link.get("inwardIssue");
                     if (inwardIssue) {
-                        keyFeature = (Map) inwardIssue.get("key"); 
-                        Map field = (Map) inwardIssue.get("fields");
+                        keyFeature = inwardIssue.get("key"); 
+                        Map field = inwardIssue.get("fields");
                         if (field) {
                             summaryFeature = field.get("summary");
                         }
@@ -536,18 +533,18 @@ public static String pDocument(String paragraph, String format, String style) {
 
     switch (format) {
         case "text":
-		return builder.build();
+  			return builder.build();
         case "html":
     		StringWriter writer = new StringWriter();
         	MarkupBuilder newBuilder = new MarkupBuilder(writer);
             if (style) {
                 switch (style) {
                     case "U":
-			newBuilder.U(paragraph);
+        				newBuilder.U(paragraph);
                     	break;
                 }
             } else {
-        	newBuilder.p(paragraph);
+        		newBuilder.p(paragraph);
             }
         	return writer.toString();
     }
@@ -558,16 +555,16 @@ public static String hDocument(String h, int level, String format) {
 
     switch (format) {
         case "text":
-		String carUnderline;
-            	switch (level) {
-		case 1: 
+        	String carUnderline;
+            switch (level) {
+				case 1: 
                 	carUnderline = "*";
-			break;
-		case 2:
-			carUnderline = "=";
+                	break;
+				case 2:
+                	carUnderline = "=";
                 	break;
             }
-	builder.addLF();
+    		builder.addLF();
     		builder.addLine(repeat(carUnderline, h.length()));
     		builder.addLine(h);
     		builder.addLine(repeat(carUnderline, h.length()));
