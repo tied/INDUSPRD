@@ -139,10 +139,10 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             Jql += " AND issuekey in ("+keys+")";
         }
         // Order
-        Jql += " ORDER BY 'X3 Product Area' ASC";
+        Jql += " ORDER BY 'X3 Product Area' ASC, 'X3 Legislation'";
 
-        // fields: summary, X3 Release Note(14806), X3 Product Area(15522)
-        query = "&fields=summary,customfield_14806,customfield_15522";
+        // fields: summary, X3 Release Note(14806), X3 Product Area(15522 -> h3), X3 Legislation(15413 -> h5), Feature(inwardIssue.fields.summary -> h6)
+        query = "&fields=summary,customfield_14806,customfield_15522,customfield_15413,issuelinks";
     }
     if (filterId) {
         // Get the query from the filter given by parameter
@@ -217,25 +217,26 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
                 if (component == "X3") {
 					contentTitle += " and Entry Points";
                 }
-                builder.append(pDocument(contentTitle, format));
+                builder.append(pDocument(contentTitle, format, ""));
             	// Release
-            	builder.append(pDocument("Product: Sage X3", format));
+            	builder.append(pDocument("Product: Sage X3", format, ""));
             	// Component
                 if (component.toLowerCase() == "syracuse") {
-            		builder.append(pDocument("Component: Syracuse", format));
+            		builder.append(pDocument("Component: Syracuse", format, ""));
                 }
             	break;
             case "releasenote":
             	break;
         }
 
-        builder.append(pDocument("Release: " + release, format));
+        builder.append(pDocument("Release: " + release, format, ""));
         
         // Body of document
         // Break fiels definition
         String fieldValue, breakValue;
         Map breakMap = (Map) jsonSlurper.parseText('{"breakFields":[]}');
         List breakFields = (List) breakMap.getAt("breakFields");
+        int hOffset;
         switch (report.toLowerCase()) {
             case "readme":
             	// issuetype
@@ -245,10 +246,16 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             		// X3 Product Area
 					breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15522","subfield":{"name":"value","breakValue":""}}'));
                 }
+            	hOffset = 0;
             	break;
             case "releasenote":
             	// X3 Product Area
             	breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15522","subfield":{"name":"value","breakValue":""}}'));
+            	// X3 Legislation
+				breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15413","subfield":{"name":"value","breakValue":""}}'));
+            	// Feature
+				// breakFields.push((Map) jsonSlurper.parseText('{"field":"issuelinks","subfield":{"name":"summary","breakValue":""}}'));
+            	hOffset = 2;
             	break;
         }
 
@@ -264,21 +271,51 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
                 String breakFieldName = breakField.getAt("field");
                 Map breakSubfield = (Map) breakField.getAt("subfield");
 
-                fieldValue = ((Map) fields.get(breakFieldName)).get(breakSubfield.getAt("name"));
-                breakValue = breakSubfield.getAt("breakValue");
-                if (fieldValue != breakValue) {
-                    breakSubfield.putAt("breakValue", fieldValue);
-
-                    // Case of issuetype value
-                    if (breakField.getAt("field") == "issuetype") {
-                        if (fieldValue == "Bug") {
-                            fieldValue = "BugFixes";
-                        } else if (fieldValue == "Entry Point") {
-                            fieldValue = "Entry Points";
+                Map field = fields.get(breakFieldName);
+                if (field) {
+                    fieldValue = field.get(breakSubfield.getAt("name"));
+                    /*
+                    if (field.getClass() == "class groovy.json.internal.LazyMap") {
+                		fieldValue = (Map) field.get(breakSubfield.getAt("name"));
+                    } else {
+                        // It's not a Map class field. Perhaps a List class field
+                        if (breakFieldName == "issuelinks") {
+                            // 
+                            List issuelinks = (List) fields.getAt(breakFieldName);
+                            issuelinks.each {
+                                Map link = (Map) it;
+                                if (link) {
+                                    // "inward": "is part of"
+                                    Map type = (Map) link.get("type");
+                                    if (type && type.get("inward") == "is part of") {
+                                        Map inwardIssue = (Map) link.get("inwardIssue");
+                                        if (inwardIssue) {
+                                            Map field1 = (Map) inwardIssue.get("fields");
+                                            if (field1) {
+                                                fieldValue = field1.get("summary");
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
+                    } */
+
+                    breakValue = breakSubfield.getAt("breakValue");
+                    if (fieldValue != breakValue) {
+                        breakSubfield.putAt("breakValue", fieldValue);
+
+                        // Case of issuetype value
+                        if (breakField.getAt("field") == "issuetype") {
+                            if (fieldValue == "Bug") {
+                                fieldValue = "BugFixes";
+                            } else if (fieldValue == "Entry Point") {
+                                fieldValue = "Entry Points";
+                            }
+                        }
+                        // Write the break field
+                        builder.append(hDocument(fieldValue, idx+1+hOffset, format));
                     }
-                    // Write the break field
-                    builder.append(hDocument(fieldValue, idx+1, format));
                 }
             }
             // h3: Issue
@@ -400,9 +437,9 @@ public static String getBodyReadme(String key, Map fields, String typeDocument, 
         if (typeDocument.toLowerCase() == "internal") {
             // format for Internal readme
             // write the 'summary' field
-        	builder.append(pDocument(summary, format));
+        	builder.append(pDocument(summary, format, ""));
             // write the 'X3 Solution details' field
-        	builder.append(pDocument("Details: " + solution, format));
+        	builder.append(pDocument("Details: " + solution, format, ""));
             // Add the X3 maintenances numbers
             if (false && maintenancesVersion && !maintenancesVersion.isEmpty()) {
                 builder.append("Maintenances: ");
@@ -418,10 +455,10 @@ public static String getBodyReadme(String key, Map fields, String typeDocument, 
             // format for External readme
     		def priorities = [Minor:"-", Major:"*", Critical:"^", Blocker:"!"];
             // write the 'summary' field
-        	builder.append(pDocument("", format));
-        	builder.append(pDocument(priorities[priorityValue] + " $summary [JIRA#$key]", format));
+        	builder.append(pDocument("", format, ""));
+        	builder.append(pDocument(priorities[priorityValue] + " $summary [JIRA#$key]", format, ""));
             // write the 'X3 Solution details' field
-            builder.append(pDocument(solution, format));
+            builder.append(pDocument(solution, format, ""));
         }
     }
 
@@ -437,8 +474,35 @@ public static String getBodyReleasenote(String key, Map fields, String typeDocum
         String summary = fields.get("summary");
         // X3 Release Note
         String releaseNote = fields.get("customfield_14806");
+        // Feature (inwardIssue, member of issuelinks)
+        String summaryFeature, keyFeature;
+        List issuelinks = (List) fields.getAt("issuelinks");
+        issuelinks.eachWithIndex {issuelink, idx ->
+            Map link = (Map) issuelink;
+            if (link) {
+                // "inward": "is part of"
+                Map type = (Map) link.get("type");
+                if (type && type.get("inward") == "is part of") {
+                    Map inwardIssue = (Map) link.get("inwardIssue");
+                    if (inwardIssue) {
+                        keyFeature = (Map) inwardIssue.get("key"); 
+                        Map field = (Map) inwardIssue.get("fields");
+                        if (field) {
+                            summaryFeature = field.get("summary");
+                        }
+                    }
+                }
+            }
+        }
 
-        builder.append(pDocument(releaseNote, format));
+        // Summary
+        builder.append(pDocument(summary + " [JIRA#$key]", format, "U"));
+        // X3 Release Note
+        builder.append(pDocument(releaseNote, format, ""));
+        // Feature summary
+        if (summaryFeature && summaryFeature != "") {
+        	builder.append(pDocument(summaryFeature + " [JIRA#$keyFeature]", format, ""));
+        }
     }
 
     return builder.toString();
@@ -466,17 +530,25 @@ public static String headerDocument(String format) {
     }
 }
 
-public static String pDocument(String paragraph, String format) {
+public static String pDocument(String paragraph, String format, String style) {
 	ReadmeBuilder builder = new ReadmeBuilder();
     builder.addLine(paragraph);
 
     switch (format) {
         case "text":
-  			return builder.build();
+		return builder.build();
         case "html":
     		StringWriter writer = new StringWriter();
         	MarkupBuilder newBuilder = new MarkupBuilder(writer);
-        	newBuilder.p(builder.build());
+            if (style) {
+                switch (style) {
+                    case "U":
+			newBuilder.U(paragraph);
+                    	break;
+                }
+            } else {
+        	newBuilder.p(paragraph);
+            }
         	return writer.toString();
     }
 }
@@ -486,16 +558,16 @@ public static String hDocument(String h, int level, String format) {
 
     switch (format) {
         case "text":
-        	String carUnderline;
-            switch (level) {
-				case 1: 
+		String carUnderline;
+            	switch (level) {
+		case 1: 
                 	carUnderline = "*";
-                	break;
-				case 2:
-                	carUnderline = "=";
+			break;
+		case 2:
+			carUnderline = "=";
                 	break;
             }
-    		builder.addLF();
+	builder.addLF();
     		builder.addLine(repeat(carUnderline, h.length()));
     		builder.addLine(h);
     		builder.addLine(repeat(carUnderline, h.length()));
@@ -504,11 +576,23 @@ public static String hDocument(String h, int level, String format) {
     		StringWriter writer = new StringWriter();
         	MarkupBuilder newBuilder = new MarkupBuilder(writer);
             switch (level) {
-				case 1: 
+				case 1:
         			newBuilder.h1(h);
                 	break;
-				case 2: 
+				case 2:
         			newBuilder.h2(h);
+                	break;
+				case 3:
+        			newBuilder.h3(h);
+                	break;
+				case 4:
+        			newBuilder.h4(h);
+                	break;
+				case 5:
+        			newBuilder.h5(h);
+                	break;
+				case 6:
+        			newBuilder.h6(h);
                 	break;
             }
         	return writer.toString();
