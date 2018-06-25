@@ -184,6 +184,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
 
     // https://docs.oracle.com/javase/8/docs/api/java/net/HttpURLConnection.html
     HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+    // connection.setRequestProperty("Authorization", "Bearer urei13mG2zew4QCJFEXmC486"); // https://id.atlassian.com/manage/api-tokens
 	connection.setRequestProperty("Authorization", "Basic " + authStringEnc);
 	connection.setRequestProperty("Content-Type", "application/json");
    	connection.setRequestMethod("GET");
