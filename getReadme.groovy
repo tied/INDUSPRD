@@ -86,7 +86,9 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     try {
         assert (report.toLowerCase() == "readme" || report.toLowerCase() == "releasenote") : "'model' parameter should be Readme ou Releasenote";
         assert (typeDocument.toLowerCase() == "internal" || typeDocument.toLowerCase() == "external") : "'type' parameter should be Internal ou External";
-        assert (release) : "'release' parameter is mandatory";
+        if (!filterId) {
+        	assert (release) : "'release' parameter is mandatory";
+        }
         assert (format.toLowerCase() == "text" || format.toLowerCase() == "html") : "'format' parameter should be text ou html";
         assert (component.toLowerCase() == "x3" || component.toLowerCase() == "syracuse") : "if given, 'component' parameter should be set to Syracuse";
     } catch (AssertionError e) {
@@ -147,6 +149,10 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     if (filterId) {
         // Get the query from the filter given by parameter
     	Jql = getFilter(filterId);
+        if (!Jql) {
+            responseBuilder = Response.status(Status.NOT_FOUND).type("text/plain").entity("Invalid filter or the filter is not published");
+            return responseBuilder.build();
+        }
     }    
     // start (optionnal)
     if (queryParams.getFirst("start")) {
@@ -752,10 +758,12 @@ class QueryString {
 public static String getFilter(String filterId) {
     
     String bodyResponse = getBodyResponse("https://jira-sage.valiantyscloud.net/rest/api/2", "/filter", "/"+filterId);
+    if (!bodyResponse) {
+        return null;
+    }
 
     def jsonSlurper = new groovy.json.JsonSlurper();
     Map jsonResult = (Map) jsonSlurper.parseText(bodyResponse);
-
     return jsonResult.get("jql");
 }
 
@@ -776,6 +784,44 @@ public static String getBodyResponse(String baseURL, String API, String query) {
     // https://docs.oracle.com/javaee/7/api/javax/ws/rs/core/Response.html
     if (connection.getResponseCode().equals(200)) {
         bodyResponse = connection.getInputStream().getText();
-	}
+	} else {
+		ResponseBuilder responseBuilder = Response.status(connection.getResponseCode()).type("text/plain").entity("Error"+connection.getResponseCode());
+		return responseBuilder.build();   
+    }
     return bodyResponse;
+}
+
+public class BodyResponse {
+  	private String bodyResponse;
+    private int httpResponse;
+
+	public BodyResponse(String baseURL, String API, String query) {
+        def bodyResponse, typeResponse;
+        URL url = new java.net.URL(baseURL + API + query);
+
+        def authString = "INDUSPRD" + ":" + "INDUSPRD";
+        byte[] authEncBytes = Base64.encodeBase64(authString.getBytes());
+        String authStringEnc = new String(authEncBytes);
+
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestProperty("Authorization", "Basic " + authStringEnc);
+        connection.setRequestProperty("Content-Type", "application/json");
+        connection.setRequestMethod("GET");
+        connection.connect();
+        if (connection.getResponseCode().equals(200)) {
+            this.bodyResponse = connection.getInputStream().getText();
+        } else {
+            this.bodyResponse = null;
+        }
+        this.httpResponse = connection.getResponseCode();
+    }
+
+    public int getHttpResponse() {
+      	return this.httpResponse;
+   	}
+
+    public String getBodyResponse() {
+      	return this.bodyResponse;
+   	}
+
 }
