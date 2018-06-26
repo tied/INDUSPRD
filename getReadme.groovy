@@ -121,7 +121,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             Jql += " AND issuekey in ("+keys+")";
         }
         // Order
-        Jql += " ORDER BY issuetype DESC, 'X3 Product Area' ASC";
+        Jql += " ORDER BY issuetype DESC, 'X3 Product Area' ASC, priority";
 
         // fields: X3 Solution Details(15118), X3 Product Area(15522), X3 Maintenances(15112), X3 Regression(15110)
         query = "&fields=summary,customfield_15118,customfield_15522,customfield_15112,issuetype,priority,customfield_15110";
@@ -147,10 +147,12 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         query = "&fields=summary,customfield_14806,customfield_15522,customfield_15413,issuelinks";
     }
     if (filterId) {
-        // Get the query from the filter given by parameter
-    	Jql = getFilter(filterId);
-        if (!Jql) {
-            responseBuilder = Response.status(Status.NOT_FOUND).type("text/plain").entity("Invalid filter or the filter is not published");
+        // Get the query directly from the filter given by parameter
+    	JiraFilter myFilter = new JiraFilter(filterId);
+        if (myFilter.isValidFilter()) {
+        	Jql = myFilter.getJql();
+        } else {
+            responseBuilder = Response.status(Status.NOT_FOUND).type("text/plain").entity(myFilter.getErrorMessage());
             return responseBuilder.build();
         }
     }    
@@ -191,10 +193,15 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     // https://docs.oracle.com/javase/8/docs/api/java/net/HttpURLConnection.html
     HttpURLConnection connection = (HttpURLConnection) url.openConnection();
     // connection.setRequestProperty("Authorization", "Bearer urei13mG2zew4QCJFEXmC486"); // https://id.atlassian.com/manage/api-tokens
+	// connection.setRequestProperty("Cache-Control", "no-cache");
+	// connection.setRequestProperty("Postman-Token", "71048418-b8bd-4098-a9ce-7cfdb162174f");
 	connection.setRequestProperty("Authorization", "Basic " + authStringEnc);
 	connection.setRequestProperty("Content-Type", "application/json");
    	connection.setRequestMethod("GET");
     connection.connect();
+
+    // BodyResponse myConnection = new BodyResponse(baseURL, API, "?" + "jql="+removedSpaces(Jql) + query);
+    
     // https://docs.oracle.com/javaee/7/api/javax/ws/rs/core/Response.html
     if (connection.getResponseCode().equals(200)) {
         bodyResponse = connection.getInputStream().getText();
@@ -330,10 +337,10 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             // Write the body issue
             switch (report.toLowerCase()) {
                 case "readme":
-        			builder.append(getBodyReadme(key, fields, typeDocument, format));
+        			builder.append(getReadmeBody(key, fields, typeDocument, format));
                 	break;
                 case "releasenote":
-        			builder.append(getBodyReleasenote(key, fields, typeDocument, format));
+        			builder.append(getReleasenoteBody(key, fields, typeDocument, format));
                 	break;
             }
 		};
@@ -400,11 +407,11 @@ public static String repeat(String s, int times) {
 }
 
 public static String getBullet(priority) {
-    def priorities = [Minor:"*", Major:"-", Critical:"^", Blocker:"x"];
+    def priorities = [Minor:"-", Major:"*", Critical:"^", Blocker:"!", None:"*"];
     return priorities[priority];
 }
 
-public static String getBodyReadme(String key, Map fields, String typeDocument, String format) {
+public static String getReadmeBody(String key, Map fields, String typeDocument, String format) {
     StringBuilder builder = new StringBuilder();
     def markupBuilder, writer;
     if (format == "html") {
@@ -457,10 +464,9 @@ public static String getBodyReadme(String key, Map fields, String typeDocument, 
             }
         } else {
             // format for External readme
-    		def priorities = [Minor:"-", Major:"*", Critical:"^", Blocker:"!"];
             // write the 'summary' field
         	builder.append(pDocument("", format, ""));
-        	builder.append(pDocument(priorities[priorityValue] + " $summary [JIRA#$key]", format, ""));
+        	builder.append(pDocument(getBullet(priorityValue) + " $summary [JIRA#$key]", format, ""));
             // write the 'X3 Solution details' field
             builder.append(pDocument(solution, format, ""));
         }
@@ -469,7 +475,7 @@ public static String getBodyReadme(String key, Map fields, String typeDocument, 
     return builder.toString();
 }
 
-public static String getBodyReleasenote(String key, Map fields, String typeDocument, String format) {
+public static String getReleasenoteBody(String key, Map fields, String typeDocument, String format) {
     StringWriter builder = new StringWriter();
     MarkupBuilder markupBuilder = new groovy.xml.MarkupBuilder(builder);
 
@@ -755,45 +761,42 @@ class QueryString {
 
 }
 
-public static String getFilter(String filterId) {
-    
-    String bodyResponse = getBodyResponse("https://jira-sage.valiantyscloud.net/rest/api/2", "/filter", "/"+filterId);
-    if (!bodyResponse) {
-        return null;
-    }
-
-    def jsonSlurper = new groovy.json.JsonSlurper();
-    Map jsonResult = (Map) jsonSlurper.parseText(bodyResponse);
-    return jsonResult.get("jql");
-}
-
-public static String getBodyResponse(String baseURL, String API, String query) {
-    def bodyResponse, typeResponse;
-	URL url = new java.net.URL(baseURL + API + query);
-
-	def authString = "INDUSPRD" + ":" + "INDUSPRD";
-	byte[] authEncBytes = Base64.encodeBase64(authString.getBytes());
-	String authStringEnc = new String(authEncBytes);
-
-    // https://docs.oracle.com/javase/8/docs/api/java/net/HttpURLConnection.html
-    HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-	connection.setRequestProperty("Authorization", "Basic " + authStringEnc);
-	connection.setRequestProperty("Content-Type", "application/json");
-   	connection.setRequestMethod("GET");
-    connection.connect();
-    // https://docs.oracle.com/javaee/7/api/javax/ws/rs/core/Response.html
-    if (connection.getResponseCode().equals(200)) {
-        bodyResponse = connection.getInputStream().getText();
-	} else {
-		ResponseBuilder responseBuilder = Response.status(connection.getResponseCode()).type("text/plain").entity("Error"+connection.getResponseCode());
-		return responseBuilder.build();   
-    }
-    return bodyResponse;
-}
-
-public class BodyResponse {
-  	private String bodyResponse;
+/*
+*/
+public class JiraFilter {
+	private String jql = null;
+    private String errorMessage = null;
     private int httpResponse;
+
+	public JiraFilter(String filterId) {
+	    BodyResponse myResponse = new BodyResponse("https://jira-sage.valiantyscloud.net/rest/api/2", "/filter", "/"+filterId);
+        this.httpResponse = myResponse.getHttpCode();
+        if (myResponse.getHttpCode().equals(200)) {
+            def jsonSlurper = new groovy.json.JsonSlurper();
+            Map jsonResult = (Map) jsonSlurper.parseText(myResponse.getBody());
+            this.jql = jsonResult.get("jql");
+        } else {
+        	this.errorMessage = myResponse.getErrorMessage();
+        }
+    }
+
+    public boolean isValidFilter() {
+      	return (this.httpResponse == 200);
+   	}
+
+    public String getJql() {
+      	return this.jql;
+   	}
+
+    public String getErrorMessage() {
+      	return this.errorMessage;
+   	}
+}
+
+/*
+*/
+public class BodyResponse {
+    private HttpURLConnection connection;
 
 	public BodyResponse(String baseURL, String API, String query) {
         def bodyResponse, typeResponse;
@@ -803,25 +806,25 @@ public class BodyResponse {
         byte[] authEncBytes = Base64.encodeBase64(authString.getBytes());
         String authStringEnc = new String(authEncBytes);
 
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection = (HttpURLConnection) url.openConnection();
         connection.setRequestProperty("Authorization", "Basic " + authStringEnc);
         connection.setRequestProperty("Content-Type", "application/json");
         connection.setRequestMethod("GET");
         connection.connect();
-        if (connection.getResponseCode().equals(200)) {
-            this.bodyResponse = connection.getInputStream().getText();
-        } else {
-            this.bodyResponse = null;
-        }
-        this.httpResponse = connection.getResponseCode();
     }
 
-    public int getHttpResponse() {
-      	return this.httpResponse;
+    public int getHttpCode() {
+      	return connection.getResponseCode();
    	}
 
-    public String getBodyResponse() {
-      	return this.bodyResponse;
+    public String getBody() {
+      	return connection.getInputStream().getText();
    	}
 
+    public String getErrorMessage() {
+        def jsonSlurper = new groovy.json.JsonSlurper();
+        Map jsonResult = (Map) jsonSlurper.parseText(connection.getErrorStream().getText());
+        List messages = (List) jsonResult.get("errorMessages");
+        return messages[0];
+   	}
 }
