@@ -141,7 +141,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             Jql += " AND issuekey in ("+keys+")";
         }
         // Order
-        Jql += " ORDER BY 'X3 Product Area' ASC, 'X3 Legislation'";
+        Jql += " ORDER BY 'X3 Product Area' ASC, 'X3 Legislation' DESC";
 
         // fields: summary, X3 Release Note(14806), X3 Product Area(15522 -> h3), X3 Legislation(15413 -> h5), Feature(inwardIssue.fields.summary -> h6)
         query = "&fields=summary,customfield_14806,customfield_15522,customfield_15413,issuelinks";
@@ -235,13 +235,15 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
                 if (component.toLowerCase() == "syracuse") {
             		builder.append(pDocument("Component: Syracuse", format, ""));
                 }
+
+        		builder.append(pDocument("Release: " + release, format, ""));
             	break;
             case "releasenote":
+                builder.append(hDocument("Release Note", 1, "", format));
+                builder.append(hDocument(release, 2, "", format));
             	break;
         }
 
-        builder.append(pDocument("Release: " + release, format, ""));
-        
         // Body of document
         // Break fiels definition
         String fieldValue, breakValue;
@@ -317,6 +319,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
                         breakSubfield.putAt("breakValue", fieldValue);
 
                         // Case of issuetype value
+                        String anchor = "";
                         if (breakField.getAt("field") == "issuetype") {
                             if (fieldValue == "Bug") {
                                 fieldValue = "BugFixes";
@@ -324,8 +327,15 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
                                 fieldValue = "Entry Points";
                             }
                         }
+                        switch (breakField.getAt("field")) {
+                            case "issuetype":
+                            	break;
+                            case "customfield_15522":
+                        		anchor = "MIS_"+(idx+1)*10+"_"+fieldValue;
+                            	break;
+                        }
                         // Write the break field
-                        builder.append(hDocument(fieldValue, idx+1+hOffset, format));
+                        builder.append(hDocument(fieldValue, idx+1+hOffset, anchor, format));
                     }
                 }
             }
@@ -563,7 +573,7 @@ public static String pDocument(String paragraph, String format, String style) {
     }
 }
 
-public static String hDocument(String h, int level, String format) {
+public static String hDocument(String h, int level, String anchor, String format) {
 	ReadmeBuilder builder = new ReadmeBuilder();
 
     switch (format) {
@@ -585,6 +595,7 @@ public static String hDocument(String h, int level, String format) {
         case "html":
     		StringWriter writer = new StringWriter();
         	MarkupBuilder newBuilder = new MarkupBuilder(writer);
+        	newBuilder.a(name: anchor, "");
             switch (level) {
 				case 1:
         			newBuilder.h1(h);
