@@ -240,6 +240,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             	break;
             case "releasenote":
                 builder.append(hDocument("Release Note", 1, "", format));
+            	builder.append(divTag("Finance"));
                 builder.append(hDocument(release, 2, "", format));
             	break;
         }
@@ -320,15 +321,13 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
 
                         // Case of issuetype value
                         String anchor = "";
-                        if (breakField.getAt("field") == "issuetype") {
-                            if (fieldValue == "Bug") {
-                                fieldValue = "BugFixes";
-                            } else if (fieldValue == "Entry Point") {
-                                fieldValue = "Entry Points";
-                            }
-                        }
                         switch (breakField.getAt("field")) {
                             case "issuetype":
+                                if (fieldValue == "Bug") {
+                                    fieldValue = "BugFixes";
+                                } else if (fieldValue == "Entry Point") {
+                                    fieldValue = "Entry Points";
+                                }
                             	break;
                             case "customfield_15522":
                         		anchor = "MIS_"+(idx+1)*10+"_"+fieldValue;
@@ -515,6 +514,7 @@ public static String getReleasenoteBody(String key, Map fields, String typeDocum
             }
         }
 
+        /*
         // Summary
         builder.append(pDocument(summary + " [JIRA#$key]", format, "U"));
         // X3 Release Note
@@ -523,6 +523,20 @@ public static String getReleasenoteBody(String key, Map fields, String typeDocum
         if (summaryFeature && summaryFeature != "") {
         	builder.append(pDocument(summaryFeature + " [JIRA#$keyFeature]", format, ""));
         }
+		*/
+		// new method
+        def backgroundColor = "transparent";
+        if (true) {
+        	backgroundColor = "lightyellow";
+		}
+		markupBuilder.div (style: "background-color:$backgroundColor") {
+        	// title ('Heading') 
+            p {u summary + " [JIRA#$key]"}
+            p releaseNote
+            if (summaryFeature && summaryFeature != "") {
+                p summaryFeature + " [JIRA#$keyFeature]"
+            }
+		}
     }
 
     return builder.toString();
@@ -618,6 +632,24 @@ public static String hDocument(String h, int level, String anchor, String format
             }
         	return writer.toString();
     }
+}
+
+public static String divTag(String value) {
+
+	def hashmap = [Finance:['#MIS_10_Finance','Finance'], Distribution:['#MIS_10_Distribution','Distribution']];
+    def writer = new StringWriter();
+    def mkup = new MarkupBuilder(writer);
+    mkup.html {
+        div(id: "main") {
+            ul {
+                hashmap.collect {k, vList ->     
+                    li {a href: vList[0], vList[1]}
+                }
+            }
+        }
+    }
+    return writer.toString();
+
 }
 
 public static String h1Document(String h1, String format) {
