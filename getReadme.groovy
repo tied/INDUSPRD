@@ -380,7 +380,8 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         responseBuilder = Response.ok(builder.toString()).type(typeResponse);
 
     } else {
-		responseBuilder = Response.status(connection.getResponseCode()).type("text/plain").entity("Error"+connection.getResponseCode());
+		responseBuilder = Response.status(connection.getResponseCode()).type("text/plain").entity("Oops! Error "+connection.getResponseCode());
+        // throw new RuntimeException("HTTP GET Request Failed with Error code: " + connection.getResponseCode());
     }
 	return responseBuilder.build();
 }
@@ -479,6 +480,18 @@ public static String getReadmeBody(String key, Map fields, String typeDocument, 
             // write the 'X3 Solution details' field
             builder.append(pDocument(solution, format, ""));
         }
+		// Get the files updated
+    	GithubCommits commits = new GithubCommits(key);
+        if (commits.asChangedFiles()) {
+        	def file = commits.getFile();
+            if (file) {
+            	builder.append(pDocument("List of updated files:", format, ""));
+            	builder.append(pDocument("- "+file, format, ""));
+            } else {
+				builder.append(pDocument("No file found!", format, ""));
+            }
+        }
+        
     }
 
     return builder.toString();
@@ -829,6 +842,50 @@ public class JiraFilter {
 
     public String getJql() {
       	return this.jql;
+   	}
+
+    public String getErrorMessage() {
+      	return this.errorMessage;
+   	}
+}
+
+public class GithubCommits {
+    private String file = null;
+    private String errorMessage = null;
+    private int httpResponse;
+
+	public GithubCommits(String issueKey) {
+	    BodyResponse myResponse = new BodyResponse("https://jira-sage.valiantyscloud.net/rest/api/2", "/issue", "/"+issueKey+"/properties/changedfiles");
+        this.httpResponse = myResponse.getHttpCode();
+        if (myResponse.getHttpCode().equals(200)) {
+            def jsonSlurper = new groovy.json.JsonSlurper();
+            Map jsonResult = (Map) jsonSlurper.parseText(myResponse.getBody());
+            Map valueMap = jsonResult.get("value");
+            List commitsList = valueMap.get("commits");
+            if (commitsList) {
+                commitsList.each {
+            		Map commit = (Map) it;
+            		List filesList = commit.get("files");
+                    if (filesList) {
+                		commitsList.each {
+            				Map file = (Map) it;
+                            this.file = file.get("filename");
+                        }
+                    }
+                }
+            }
+
+        } else {
+        	this.errorMessage = myResponse.getErrorMessage();
+        }
+    }
+
+    public boolean asChangedFiles() {
+      	return (this.httpResponse == 200);
+   	}
+
+    public String getFile() {
+      	return this.file;
    	}
 
     public String getErrorMessage() {
