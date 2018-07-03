@@ -340,7 +340,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             }
             // h3: Issue
             if (typeDocument.toLowerCase() == "internal") {
-            	builder.append(h3Document("https://jira-sage.valiantyscloud.net/browse/", key, "summary", format));
+            	// builder.append(h3Document("https://jira-sage.valiantyscloud.net/browse/", key, "summary", format));
             }
 
             // Write the body issue
@@ -457,10 +457,11 @@ public static String getReadmeBody(String key, Map fields, String typeDocument, 
         // Write informations
         if (typeDocument.toLowerCase() == "internal") {
             // format for Internal readme
+        	builder.append(pDocument("", format, ""));
             // write the 'summary' field
-        	builder.append(pDocument(summary, format, ""));
+        	builder.append(pDocument(getBullet(priorityValue) + " $key - $summary", format, ""));
             // write the 'X3 Solution details' field
-        	builder.append(pDocument("Details: " + solution, format, ""));
+        	builder.append(pDocument(solution, format, ""));
             // Add the X3 maintenances numbers
             if (false && maintenancesVersion && !maintenancesVersion.isEmpty()) {
                 builder.append("Maintenances: ");
@@ -474,21 +475,22 @@ public static String getReadmeBody(String key, Map fields, String typeDocument, 
             }
         } else {
             // format for External readme
-            // write the 'summary' field
         	builder.append(pDocument("", format, ""));
+            // write the 'summary' field
         	builder.append(pDocument(getBullet(priorityValue) + " $summary [JIRA#$key]", format, ""));
             // write the 'X3 Solution details' field
             builder.append(pDocument(solution, format, ""));
         }
-		// Get the files updated
+
+        // Get the files updated on Github (see properties on JIRA API)
     	GithubCommits commits = new GithubCommits(key);
         if (commits.asChangedFiles()) {
-        	def file = commits.getFile();
-            if (file) {
-            	builder.append(pDocument("List of updated files:", format, ""));
-            	builder.append(pDocument("- "+file, format, ""));
-            } else {
-				builder.append(pDocument("No file found!", format, ""));
+        	def files = commits.getFiles();
+            if (files) {
+            	builder.append(pDocument("Updated files:", format, ""));
+                files.eachWithIndex() {item, idx ->
+            		builder.append(pDocument("- " + item, format, ""));
+                }                
             }
         }
         
@@ -849,8 +851,11 @@ public class JiraFilter {
    	}
 }
 
+/*
+@see https://jira-sage.valiantyscloud.net/rest/api/2/issue/<issuekey>/properties/changedfiles
+*/
 public class GithubCommits {
-    private String file = null;
+	private ArrayList files = new ArrayList();
     private String errorMessage = null;
     private int httpResponse;
 
@@ -867,9 +872,9 @@ public class GithubCommits {
             		Map commit = (Map) it;
             		List filesList = commit.get("files");
                     if (filesList) {
-                		commitsList.each {
+                		filesList.each {
             				Map file = (Map) it;
-                            this.file = file.get("filename");
+                    		this.files.add(file.get("filename"));
                         }
                     }
                 }
@@ -884,8 +889,8 @@ public class GithubCommits {
       	return (this.httpResponse == 200);
    	}
 
-    public String getFile() {
-      	return this.file;
+    public ArrayList getFiles() {
+      	return this.files;
    	}
 
     public String getErrorMessage() {
