@@ -26,6 +26,7 @@ import javax.ws.rs.core.Response.ResponseBuilder;
 import javax.ws.rs.core.MediaType;
 import java.net.URLEncoder;
 import java.net.HttpURLConnection;
+import java.util.regex.*;
 import java.util.regex.Pattern;
 
 import javax.swing.text.html.HTMLDocument;
@@ -80,13 +81,16 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     // component: Syracuse for Syracuse fixing
     String component = queryParams.getFirst("component");
     if (!component) {component = "X3"};
-    // header
+    // header (External only)
     String header = queryParams.getFirst("header");
     if (!header) {header = "yes"};
+    // changed files (Internal only)
+    String files = queryParams.getFirst("files");
+	def changedFiles = (files && files.toLowerCase() == "yes") ? true : false;
     try {
         assert (report.toLowerCase() == "readme" || report.toLowerCase() == "releasenote") : "'model' parameter should be Readme ou Releasenote";
         assert (typeDocument.toLowerCase() == "internal" || typeDocument.toLowerCase() == "external") : "'type' parameter should be Internal ou External";
-        if (!filterId) {
+        if (!filterId && !keys) {
         	assert (release) : "'release' parameter is mandatory";
         }
         assert (format.toLowerCase() == "text" || format.toLowerCase() == "html") : "'format' parameter should be text ou html";
@@ -106,19 +110,22 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     if (report.toLowerCase() == "readme") {
         // Issue type
         Jql += " AND issuetype in (Bug,'Entry Point')";
-        // Status
-        Jql += " AND status=Done";
-        // Resolution
-        Jql += " AND resolution in (Done,Fixed)";
-        // 
+        // Document type
         if (typeDocument.toLowerCase() == "external") {
             Jql += " AND 'X3 ReadMe Check'='To be communicated'";
         }
         // Releases
-        Jql += " AND fixVersion in versionMatch('^"+release+"')";
+        if (release) {
+        	Jql += " AND fixVersion in versionMatch('^"+release+"')";
+        }
         // JIRA keys (optionnal)
         if (keys) {
             Jql += " AND issuekey in ("+keys+")";
+        } else {
+            // Status
+            Jql += " AND status=Done";
+            // Resolution
+            Jql += " AND resolution in (Done,Fixed)";
         }
         // Order
         Jql += " ORDER BY issuetype DESC, 'X3 Product Area' ASC, priority";
@@ -235,8 +242,14 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
                 if (component.toLowerCase() == "syracuse") {
             		builder.append(pDocument("Component: Syracuse", format, ""));
                 }
-
-        		builder.append(pDocument("Release: " + release, format, ""));
+				// Release
+                if (release) {
+        			builder.append(pDocument("Release: " + release, format, ""));
+                }
+            	// Document type
+                if (typeDocument.toLowerCase() == "internal") {
+            		builder.append(pDocument("Warning! " + typeDocument + " document", format, ""));
+                }
             	break;
             case "releasenote":
                 builder.append(hDocument("Release Note", 1, "", format));
@@ -346,7 +359,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             // Write the body issue
             switch (report.toLowerCase()) {
                 case "readme":
-        			builder.append(getReadmeBody(key, fields, typeDocument, format));
+        			builder.append(getReadmeBody(key, fields, typeDocument, format, changedFiles));
                 	break;
                 case "releasenote":
         			builder.append(getReleasenoteBody(key, fields, typeDocument, format));
@@ -417,11 +430,11 @@ public static String repeat(String s, int times) {
 }
 
 public static String getBullet(priority) {
-    def priorities = [Minor:"-", Major:"*", Critical:"^", Blocker:"!", None:"*"];
+    def priorities = [Minor:"-", Major:"*", Critical:"^", Blocker:"!", Standard:"*"];
     return priorities[priority];
 }
 
-public static String getReadmeBody(String key, Map fields, String typeDocument, String format) {
+public static String getReadmeBody(String key, Map fields, String typeDocument, String format, boolean changedfiles) {
     StringBuilder builder = new StringBuilder();
     def markupBuilder, writer;
     if (format == "html") {
@@ -461,7 +474,15 @@ public static String getReadmeBody(String key, Map fields, String typeDocument, 
             // write the 'summary' field
         	builder.append(pDocument(getBullet(priorityValue) + " $key - $summary", format, ""));
             // write the 'X3 Solution details' field
-        	builder.append(pDocument(solution, format, ""));
+            if (solution) {
+                // "^[\\r?\\n]", "(\\r*\\n)\$"
+                def properSolution = solution.replaceAll("(\\r*\\n)\$", "");
+        		builder.append(pDocument(properSolution, format, ""));
+                // $|^\s*\r?\n
+                //builder.append(pDocument(solution.replaceAll(System.getProperty("line.separator"), ""), format, ""));
+            } else {
+            	builder.append(pDocument("<no solution given for this ticket>", format, ""));
+            }
             // Add the X3 maintenances numbers
             if (false && maintenancesVersion && !maintenancesVersion.isEmpty()) {
                 builder.append("Maintenances: ");
@@ -477,23 +498,29 @@ public static String getReadmeBody(String key, Map fields, String typeDocument, 
             // format for External readme
         	builder.append(pDocument("", format, ""));
             // write the 'summary' field
-        	builder.append(pDocument(getBullet(priorityValue) + " $summary [JIRA#$key]", format, ""));
+        	builder.append(pDocument(getBullet("Standard") + " $summary [JIRA#$key]", format, ""));
             // write the 'X3 Solution details' field
-            builder.append(pDocument(solution, format, ""));
+            if (solution) {
+            	builder.append(pDocument(solution, format, ""));
+            } else {
+            	builder.append(pDocument("<no solution given for this ticket>", format, ""));
+            }
         }
 
         // Get the files updated on Github (see properties on JIRA API)
-    	GithubCommits commits = new GithubCommits(key);
-        if (commits.asChangedFiles()) {
-        	def files = commits.getFiles();
-            if (files) {
-            	builder.append(pDocument("Updated files:", format, ""));
-                files.eachWithIndex() {item, idx ->
-            		builder.append(pDocument("- " + item, format, ""));
-                }                
-            }
+        if (changedfiles) {
+            GithubCommits commits = new GithubCommits(key);
+            if (commits.asChangedFiles()) {
+                def files = commits.getFiles();
+                if (files) {
+                    def numberFiles = files.size();
+                    builder.append(pDocument("$numberFiles changed files:", format, ""));
+                    files.eachWithIndex() {item, idx ->
+                        builder.append(pDocument(". " + item, format, ""));
+                    }                
+                }
+            }        
         }
-        
     }
 
     return builder.toString();
