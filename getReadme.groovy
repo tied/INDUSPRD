@@ -66,12 +66,12 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     // model: readme (default), releasenote
     String report = queryParams.getFirst("report");
     if (!report) {report = "readme"};
-    // type: External (default), Internal
+    // type: External(default), Internal
     String typeDocument = queryParams.getFirst("type");
     if (!typeDocument) {typeDocument = "External"};
 	// release
     String release = queryParams.getFirst("release");
-    // format: text (default), html
+    // format: text(default), html
     String format = queryParams.getFirst("format");
     if (!format) {format = "text"};
     // keys: JIRA keys for testing 'X3-111,X3-222,...'
@@ -86,7 +86,13 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     if (!header) {header = "yes"};
     // changed files (Internal only)
     String files = queryParams.getFirst("files");
-	def changedFiles = (files && files.toLowerCase() == "yes") ? true : false;
+    if (!files) {files = "yes"};
+	def changedFiles = (files && files.toLowerCase() == "no") ? false : true;
+    // bullet
+    String bullet = queryParams.getFirst("bullet");
+    // debug
+    if (!queryParams.getFirst("debug")) {queryParams.putSingle("debug", "no")};
+    // Checks mandatory parameters
     try {
         assert (report.toLowerCase() == "readme" || report.toLowerCase() == "releasenote") : "'model' parameter should be Readme ou Releasenote";
         assert (typeDocument.toLowerCase() == "internal" || typeDocument.toLowerCase() == "external") : "'type' parameter should be Internal ou External";
@@ -94,14 +100,20 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         	assert (release) : "'release' parameter is mandatory";
         }
         assert (format.toLowerCase() == "text" || format.toLowerCase() == "html") : "'format' parameter should be text ou html";
-        assert (component.toLowerCase() == "x3" || component.toLowerCase() == "syracuse") : "if given, 'component' parameter should be set to Syracuse";
+        assert (component.toUpperCase() == "X3" || component.toLowerCase() == "syracuse") : "if given, 'component' parameter should be set to Syracuse";
     } catch (AssertionError e) {
         responseBuilder = Response.status(Status.NOT_FOUND).type("text/plain").entity("Something is wrong: " + e.getMessage());
         return responseBuilder.build();
     }
+	queryParams.putSingle("report", report.toLowerCase())
+	queryParams.putSingle("type", typeDocument.toLowerCase())
+	queryParams.putSingle("format", format.toLowerCase())
+	queryParams.putSingle("component", component.toUpperCase())
+	queryParams.putSingle("header", header.toLowerCase())
+	queryParams.putSingle("files", files.toLowerCase())
 
 	// Base url
-    def baseURL = "https://jira-sage.valiantyscloud.net/rest/api/2";
+    def baseURL = "https://jira-sage.valiantyscloud.net/rest/api/latest";
     // Search API syntax
     def API = "/search";
     // JQL query
@@ -127,20 +139,22 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             // Resolution
             Jql += " AND resolution in (Done,Fixed)";
         }
+        Jql += " AND issuekey not in ('X3-49153')";
         // Order
         Jql += " ORDER BY issuetype DESC, 'X3 Product Area' ASC, priority";
 
         // fields: X3 Solution Details(15118), X3 Product Area(15522), X3 Maintenances(15112), X3 Regression(15110)
-        query = "&fields=summary,customfield_15118,customfield_15522,customfield_15112,issuetype,priority,customfield_15110";
+        query = "&fields=summary,customfield_15118,customfield_15522,customfield_15112,issuetype,priority,customfield_15110,fixVersions";
     } else if (report.toLowerCase() == "releasenote") {
         // Issue type
-        Jql += " AND issuetype in (Epic)";
+        Jql += " AND issuetype in (Epic, Bug)";
         // Status
         Jql += " AND status=Done";
         // 
-        if (typeDocument.toLowerCase() == "external") {
-            Jql += " AND 'X3 Release Note Check'='To be communicated'";
-        }
+        Jql += " AND (";
+        Jql += "(issuetype=Epic AND 'X3 Release Note Check'='To be communicated')";	//Features
+        Jql += " OR (issuetype=Bug AND 'X3 Behaviour Change'=Yes)";	// Changes
+        Jql += ")";
         // Releases
         Jql += " AND fixVersion in versionMatch('^"+release+"')";
         // JIRA keys (optionnal)
@@ -148,10 +162,12 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             Jql += " AND issuekey in ("+keys+")";
         }
         // Order
-        Jql += " ORDER BY 'X3 Product Area' ASC, 'X3 Legislation' DESC";
+        Jql += " ORDER BY 'X3 Product Area' ASC, issuetype ASC, 'X3 Legislation' DESC";
 
-        // fields: summary, X3 Release Note(14806), X3 Product Area(15522 -> h3), X3 Legislation(15413 -> h5), Feature(inwardIssue.fields.summary -> h6)
-        query = "&fields=summary,customfield_14806,customfield_15522,customfield_15413,issuelinks";
+        // fields: Epic name(10801), X3 Release Note(14806), X3 Product Area(15522 -> h3), X3 Legislation(15413 -> h5), Feature(inwardIssue.fields.summary -> h6)
+		//         summary, X3 Solution Details(15118)
+        query = "&fields=issuetype,summary,customfield_10801,customfield_14806,customfield_15522,customfield_15413,customfield_15118,issuelinks,comment";
+		query += "&expand=renderedFields";
     }
     if (filterId) {
         // Get the query directly from the filter given by parameter
@@ -190,28 +206,10 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
 	    } 
 	}
 */
-    
-	URL url = new java.net.URL(baseURL + API + "?" + "jql="+removedSpaces(Jql) + query);
-
-	def authString = "INDUSPRD" + ":" + "INDUSPRD";
-	byte[] authEncBytes = Base64.encodeBase64(authString.getBytes());
-	String authStringEnc = new String(authEncBytes);
-
-    // https://docs.oracle.com/javase/8/docs/api/java/net/HttpURLConnection.html
-    HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-    // connection.setRequestProperty("Authorization", "Bearer urei13mG2zew4QCJFEXmC486"); // https://id.atlassian.com/manage/api-tokens
-	// connection.setRequestProperty("Cache-Control", "no-cache");
-	// connection.setRequestProperty("Postman-Token", "71048418-b8bd-4098-a9ce-7cfdb162174f");
-	connection.setRequestProperty("Authorization", "Basic " + authStringEnc);
-	connection.setRequestProperty("Content-Type", "application/json");
-   	connection.setRequestMethod("GET");
-    connection.connect();
-
-    // BodyResponse myConnection = new BodyResponse(baseURL, API, "?" + "jql="+removedSpaces(Jql) + query);
-    
     // https://docs.oracle.com/javaee/7/api/javax/ws/rs/core/Response.html
-    if (connection.getResponseCode().equals(200)) {
-        bodyResponse = connection.getInputStream().getText();
+    BodyResponse connection = new BodyResponse(baseURL, API, "?" + "jql="+removedSpaces(Jql) + query);
+    if (connection.getHttpCode().equals(200)) {
+        bodyResponse = connection.getBody();
         // Parse the response JSON
         def jsonSlurper = new groovy.json.JsonSlurper();
         Map jsonResult = (Map) jsonSlurper.parseText(bodyResponse);
@@ -252,9 +250,19 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
                 }
             	break;
             case "releasenote":
-                builder.append(hDocument("Release Note", 1, "", format));
-            	builder.append(divTag("Finance"));
-                builder.append(hDocument(release, 2, "", format));
+            	/*
+                StringWriter builderHead = new StringWriter();
+                MarkupBuilder markupBuilder = new groovy.xml.MarkupBuilder(builderHead);
+                markupBuilder.head () {
+                	title "RELEASE NOTES"
+                    script type: "text/javascript"
+                    link rel: "Stylesheet", type: "text/css", media: "all", href: "http://online-help.sageerpx3.com/erp/99/wp-static-content/news/en_US/ReleaseNote_11/ADXHelp_main.css"
+                }
+      			builder.append((String) builderHead.toString()); */
+       			// builder.append(getReleasenoteHeader());
+				builder.append(getReleasenoteHeader());
+				//builder.append(hDocument("RELEASE NOTES", 1, "", format));
+                //builder.append(hDocument(release, 2, "", format));
             	break;
         }
 
@@ -266,7 +274,11 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         int hOffset;
         switch (report.toLowerCase()) {
             case "readme":
-            	// issuetype
+            	// fixVersions
+                if (false) {
+                    breakFields.push((Map) jsonSlurper.parseText('{"field":"fixVersions","subfield":{"name":"name","breakValue":""}}'));
+                }
+            	// issuetype (Bug, Entry Point)
             	breakFields.push((Map) jsonSlurper.parseText('{"field":"issuetype","subfield":{"name":"name","breakValue":""}}'));
             	// For Syracuse, break only
             	if (component.toLowerCase() != "syracuse") {
@@ -277,9 +289,11 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             	break;
             case "releasenote":
             	// X3 Product Area
-            	breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15522","subfield":{"name":"value","breakValue":""}}'));
+            	breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15522","subfield":{"name":"value","breakValue":""},"level":"3","class":"g1"}'));
+            	// issuetype
+				breakFields.push((Map) jsonSlurper.parseText('{"field":"issuetype","subfield":{"name":"name","breakValue":""},"level":"3","class":"changes"}'));
             	// X3 Legislation
-				breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15413","subfield":{"name":"value","breakValue":""}}'));
+				breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15413","subfield":{"name":"value","breakValue":""},"level":"5","class":""}'));
             	// Feature
 				// breakFields.push((Map) jsonSlurper.parseText('{"field":"issuelinks","subfield":{"name":"summary","breakValue":""}}'));
             	hOffset = 2;
@@ -291,16 +305,34 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         issues.each {
             Map issue = (Map) it;
     		String key = issue.get("key");
-    		Map fields = issue.get("fields");
+			Map fields = issue.get("fields");
 
             // Retreive the break fields
             breakFields.eachWithIndex {breakField, idx ->
                 String breakFieldName = breakField.getAt("field");
                 Map breakSubfield = (Map) breakField.getAt("subfield");
 
-                Map field = fields.get(breakFieldName);
-                if (field) {
-                    fieldValue = field.get(breakSubfield.getAt("name"));
+				fieldValue = "";
+				// Get the value property on the issue
+                if (breakFieldName == "fixVersions") {
+                    List fixVersions = (List) fields.getAt(breakFieldName);
+                    fixVersions.each {
+                        Map fixVersion = (Map) it;
+                        if (fixVersion) {
+                            String name = fixVersion.get("name");
+                            if (name.indexOf(release) >= 0) {
+                           		fieldValue = name;
+                                return;
+                            }
+                        }
+                    }
+                } else {
+					Map field = fields.get(breakFieldName);
+                    if (field) {
+                    	fieldValue = field.get(breakSubfield.getAt("name"));
+                    }
+                }
+                if (fieldValue && fieldValue.length() > 0) {
                     /*
                     if (field.getClass() == "class groovy.json.internal.LazyMap") {
                 		fieldValue = (Map) field.get(breakSubfield.getAt("name"));
@@ -330,39 +362,54 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
 
                     breakValue = breakSubfield.getAt("breakValue");
                     if (fieldValue != breakValue) {
+						// Reset the breakValues
+                        if (report.toLowerCase() == "readme" && component.toLowerCase() != "syracuse" && breakFieldName == "issuetype") {
+                            breakFields[1].getAt("subfield").putAt("breakValue", "");
+                        }
+						// Store the breakValue
                         breakSubfield.putAt("breakValue", fieldValue);
 
                         // Case of issuetype value
                         String anchor = "";
                         switch (breakField.getAt("field")) {
                             case "issuetype":
-                                if (fieldValue == "Bug") {
-                                    fieldValue = "BugFixes";
-                                } else if (fieldValue == "Entry Point") {
-                                    fieldValue = "Entry Points";
+                                switch (fieldValue) {
+									case "Bug":
+                                        if (report.toLowerCase() == "readme") {
+                                            fieldValue = "Bug Fixes";
+                                        } else if (report.toLowerCase() == "releasenote") {
+                                            fieldValue = "CHANGES";
+                                        }
+                                    	break;
+									case "Entry Point":
+                                    	fieldValue = "Entry Points";
+                                    	break;
+									case "Epic":
+                                    	fieldValue = "FEATURES";
+                                    	break;
                                 }
                             	break;
-                            case "customfield_15522":
+                            case "customfield_15522":	// X3 Product Area
                         		anchor = "MIS_"+(idx+1)*10+"_"+fieldValue;
                             	break;
                         }
-                        // Write the break field
-                        builder.append(hDocument(fieldValue, idx+1+hOffset, anchor, format));
+                        // Write the value of the break field
+						Integer level = ((String) breakField.getAt("level")).toInteger();
+						String hclass = breakField.getAt("class");
+                        // builder.append(hDocument(fieldValue, idx+1+hOffset, anchor, hclass, format));
+                        builder.append(hDocument(fieldValue, level, anchor, hclass, format));
                     }
                 }
-            }
-            // h3: Issue
-            if (typeDocument.toLowerCase() == "internal") {
-            	// builder.append(h3Document("https://jira-sage.valiantyscloud.net/browse/", key, "summary", format));
             }
 
             // Write the body issue
             switch (report.toLowerCase()) {
                 case "readme":
-        			builder.append(getReadmeBody(key, fields, typeDocument, format, changedFiles));
+        			builder.append(getReadmeBody(key, fields, queryParams));
                 	break;
                 case "releasenote":
-        			builder.append(getReleasenoteBody(key, fields, typeDocument, format));
+					Map renderedFields = issue.get("renderedFields");
+        			builder.append(getReleasenoteBody(key, fields, renderedFields, queryParams));
                 	break;
             }
 		};
@@ -393,8 +440,8 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         responseBuilder = Response.ok(builder.toString()).type(typeResponse);
 
     } else {
-		responseBuilder = Response.status(connection.getResponseCode()).type("text/plain").entity("Oops! Error "+connection.getResponseCode());
-        // throw new RuntimeException("HTTP GET Request Failed with Error code: " + connection.getResponseCode());
+		responseBuilder = Response.status(connection.getHttpCode()).type("text/plain").entity("Oops! Error "+connection.getHttpCode());
+        // throw new RuntimeException("HTTP GET Request Failed with Error code: " + connection.getHttpCode());
     }
 	return responseBuilder.build();
 }
@@ -429,15 +476,20 @@ public static String repeat(String s, int times) {
     return stringBuilder.toString();
 }
 
-public static String getBullet(priority) {
-    def priorities = [Minor:"-", Major:"*", Critical:"^", Blocker:"!", Standard:"*"];
-    return priorities[priority];
+public static String getBullet(priority, String defaultBullet) {
+    def priorities = [Minor:"-", Major:"*", Critical:"^", Blocker:"!"];
+    if (priority) {
+    	return priorities[priority];
+    } else {
+    	return defaultBullet;
+    }
 }
 
-public static String getReadmeBody(String key, Map fields, String typeDocument, String format, boolean changedfiles) {
-    StringBuilder builder = new StringBuilder();
+public static String getReadmeBody(String key, Map fields, MultivaluedMap queryParams) {
+	String format = queryParams.getFirst("format");
+	StringBuilder builder = new StringBuilder();
     def markupBuilder, writer;
-    if (format == "html") {
+    if (format == "html") { // if (format == "html") {
     	writer = new StringWriter();
         markupBuilder = new groovy.xml.MarkupBuilder(writer);
     }
@@ -468,11 +520,11 @@ public static String getReadmeBody(String key, Map fields, String typeDocument, 
         }
 
         // Write informations
-        if (typeDocument.toLowerCase() == "internal") {
+		if (queryParams.getFirst("typeDocument") == "internal") { //if (typeDocument.toLowerCase() == "internal") {
             // format for Internal readme
         	builder.append(pDocument("", format, ""));
             // write the 'summary' field
-        	builder.append(pDocument(getBullet(priorityValue) + " $key - $summary", format, ""));
+        	builder.append(pDocument(getBullet(priorityValue, "") + " $key - $summary", format, ""));
             // write the 'X3 Solution details' field
             if (solution) {
                 // "^[\\r?\\n]", "(\\r*\\n)\$"
@@ -498,7 +550,7 @@ public static String getReadmeBody(String key, Map fields, String typeDocument, 
             // format for External readme
         	builder.append(pDocument("", format, ""));
             // write the 'summary' field
-        	builder.append(pDocument(getBullet("Standard") + " $summary [JIRA#$key]", format, ""));
+        	builder.append(pDocument(getBullet(null, "-") + " $summary [JIRA#$key]", format, ""));
             // write the 'X3 Solution details' field
             if (solution) {
             	builder.append(pDocument(solution, format, ""));
@@ -508,8 +560,8 @@ public static String getReadmeBody(String key, Map fields, String typeDocument, 
         }
 
         // Get the files updated on Github (see properties on JIRA API)
-        if (changedfiles) {
-            GithubCommits commits = new GithubCommits(key);
+		if (!(queryParams.getFirst("files") == "no")) { //if (changedfiles) {
+            ChangedFiles commits = new ChangedFiles(key);
             if (commits.asChangedFiles()) {
                 def files = commits.getFiles();
                 if (files) {
@@ -517,25 +569,54 @@ public static String getReadmeBody(String key, Map fields, String typeDocument, 
                     builder.append(pDocument("$numberFiles changed files:", format, ""));
                     files.eachWithIndex() {item, idx ->
                         builder.append(pDocument(". " + item, format, ""));
-                    }                
+                    }
                 }
-            }        
+            }
         }
     }
 
     return builder.toString();
 }
 
-public static String getReleasenoteBody(String key, Map fields, String typeDocument, String format) {
+public static String getReleasenoteHeader() {
+    StringWriter builder = new StringWriter();
+    MarkupBuilder markupBuilder = new groovy.xml.MarkupBuilder(builder);
+    markupBuilder.head () {
+        title "RELEASE NOTES"
+        //script (type: "text/javascript")
+        link rel: "Stylesheet", type: "text/css", media: "all", href: "http://online-help.sageerpx3.com/erp/99/wp-static-content/news/en_US/ReleaseNote_11/ADXHelp_main.css"
+    }
+	return builder.toString();
+}
+
+public static String getReleasenoteBody(String key, Map fields, Map renderedFields, MultivaluedMap queryParams) {
     StringWriter builder = new StringWriter();
     MarkupBuilder markupBuilder = new groovy.xml.MarkupBuilder(builder);
 
     if (fields) {
-        // summary
-        String summary = fields.get("summary");
-        // X3 Release Note
-        String releaseNote = fields.get("customfield_14806");
-        // Feature (inwardIssue, member of issuelinks)
+        // issuetype
+        String issuetype = ((Map) fields.get("issuetype")).get("name");
+		// summary and note
+        String summary, releaseNote;
+        if (issuetype == "Epic") {
+            // Epic
+        	summary = fields.get("customfield_10801");
+        	releaseNote = fields.get("customfield_14806");
+        } else {
+            // Bug
+        	summary = fields.get("summary");
+        	releaseNote = fields.get("customfield_15118");
+        }
+		// Comments (for POC, get the comment as the release note field)
+        Map comment = renderedFields.get("comment");
+        String newReleaseNote;
+        if (comment) {
+            List comments = (List) comment.getAt("comments");
+            if (comments) {
+                releaseNote = comments[0].getAt("body");
+            }
+        }
+		// Feature (inwardIssue, member of issuelinks)
         String summaryFeature, keyFeature;
         List issuelinks = (List) fields.getAt("issuelinks");
         issuelinks.eachWithIndex {issuelink, idx ->
@@ -556,27 +637,65 @@ public static String getReleasenoteBody(String key, Map fields, String typeDocum
             }
         }
 
-        /*
-        // Summary
-        builder.append(pDocument(summary + " [JIRA#$key]", format, "U"));
-        // X3 Release Note
-        builder.append(pDocument(releaseNote, format, ""));
-        // Feature summary
-        if (summaryFeature && summaryFeature != "") {
-        	builder.append(pDocument(summaryFeature + " [JIRA#$keyFeature]", format, ""));
-        }
-		*/
-		// new method
         def backgroundColor = "transparent";
-        if (true) {
+        if (queryParams.getFirst("type") == "internal") {
         	backgroundColor = "lightyellow";
 		}
-		markupBuilder.div (style: "background-color:$backgroundColor") {
-        	// title ('Heading') 
-            p {u summary + " [JIRA#$key]"}
-            p releaseNote
-            if (summaryFeature && summaryFeature != "") {
-                p summaryFeature + " [JIRA#$keyFeature]"
+/*
+mkp.html{
+   head{ 
+      title "bijoy's groovy"
+   }
+   body{
+      div(style:"color:red"){
+         p "this is cool"
+      }
+   }
+}
+*/
+/*
+builder.html {     
+  head {         
+    title"XML encoding with Groovy"     
+  }     
+  body {
+    h1"XML encoding with Groovy"   
+    p"this format can be used as an alternative markup to XML"      
+
+    a(href:'http://groovy.codehaus.org', "Groovy")
+
+    p {
+      mkp.yield "This is some"
+      b"mixed"   
+      mkp.yield " text. For more see the"
+      a(href:'http://groovy.codehaus.org', "Groovy")
+      mkp.yield "project"    
+    }
+    p "some text"    
+  } 
+}
+*/
+		markupBuilder.div (style: "background-color:$backgroundColor", id:"$key") {
+        	// title ('Heading')
+            if (queryParams.getFirst("debug") == "yes") {
+        		String productArea = ((Map) fields.get("customfield_15522")).get("value");
+                p "[$productArea][$issuetype][$key] $summary"
+            } else {
+                p {
+                    if (queryParams.getFirst("type") == "internal") {
+                    	a (href:"https://jira-sage.valiantyscloud.net/browse/$key", "$summary [$key]")
+                    } else {
+						u summary
+                    }
+                }
+                p releaseNote
+                if (false && newReleaseNote) {
+                    p newReleaseNote
+                }
+				/*
+                if (summaryFeature && summaryFeature != "") {
+                    p summaryFeature + " [JIRA#$keyFeature]"
+                }*/
             }
 		}
     }
@@ -629,19 +748,20 @@ public static String pDocument(String paragraph, String format, String style) {
     }
 }
 
-public static String hDocument(String h, int level, String anchor, String format) {
-	ReadmeBuilder builder = new ReadmeBuilder();
-
-    switch (format) {
+public static String hDocument(String h, int level, String anchor, String pclass, String format) {
+	switch (format) {
         case "text":
+			ReadmeBuilder builder = new ReadmeBuilder();
         	String carUnderline;
             switch (level) {
 				case 1: 
-                	carUnderline = "*";
-                	break;
-				case 2:
                 	carUnderline = "=";
                 	break;
+				case 2:
+                	carUnderline = "-";
+                	break;
+                default :
+                	carUnderline = "-";
             }
     		builder.addLF();
     		builder.addLine(repeat(carUnderline, h.length()));
@@ -654,22 +774,22 @@ public static String hDocument(String h, int level, String anchor, String format
         	newBuilder.a(name: anchor, "");
             switch (level) {
 				case 1:
-        			newBuilder.h1(h);
+        			newBuilder.h1(class: pclass, h);
                 	break;
 				case 2:
-        			newBuilder.h2(h);
+        			newBuilder.h2(class: pclass, h);
                 	break;
 				case 3:
-        			newBuilder.h3(h);
+        			newBuilder.h3(class: pclass, h);
                 	break;
 				case 4:
-        			newBuilder.h4(h);
+        			newBuilder.h4(class: pclass, h);
                 	break;
 				case 5:
-        			newBuilder.h5(h);
+        			newBuilder.h5(class: pclass, h);
                 	break;
 				case 6:
-        			newBuilder.h6(h);
+        			newBuilder.h6(class: pclass, h);
                 	break;
             }
         	return writer.toString();
@@ -773,7 +893,7 @@ public static String footerDocument(String format) {
     		builder.addLine(footer);
   			return builder.build();
         case "html":
-    		builder.addLine(footer);
+    		builder.addLine("");
             StringWriter writer = new StringWriter();
         	MarkupBuilder newBuilder = new MarkupBuilder(writer);
         	newBuilder.p(builder.build());
@@ -799,6 +919,11 @@ class ReadmeBuilder {
 
     public ReadmeBuilder addLF() {
         script.append(newLine())
+        return this
+    }
+
+    public ReadmeBuilder addFF() {
+        script.append("\f")
         return this
     }
 
@@ -881,12 +1006,12 @@ public class JiraFilter {
 /*
 @see https://jira-sage.valiantyscloud.net/rest/api/2/issue/<issuekey>/properties/changedfiles
 */
-public class GithubCommits {
+public class ChangedFiles {
 	private ArrayList files = new ArrayList();
     private String errorMessage = null;
     private int httpResponse;
 
-	public GithubCommits(String issueKey) {
+	public ChangedFiles(String issueKey) {
 	    BodyResponse myResponse = new BodyResponse("https://jira-sage.valiantyscloud.net/rest/api/2", "/issue", "/"+issueKey+"/properties/changedfiles");
         this.httpResponse = myResponse.getHttpCode();
         if (myResponse.getHttpCode().equals(200)) {
@@ -937,9 +1062,9 @@ public class BodyResponse {
         def authString = "INDUSPRD" + ":" + "INDUSPRD";
         byte[] authEncBytes = Base64.encodeBase64(authString.getBytes());
         String authStringEnc = new String(authEncBytes);
-
         connection = (HttpURLConnection) url.openConnection();
-        connection.setRequestProperty("Authorization", "Basic " + authStringEnc);
+        // connection.setRequestProperty("Authorization", "Basic " + authStringEnc);
+    	connection.setRequestProperty("Authorization", buildBasicAuthorizationString("INDUSPRD", "INDUSPRD"));
         connection.setRequestProperty("Content-Type", "application/json");
         connection.setRequestMethod("GET");
         connection.connect();
@@ -959,4 +1084,10 @@ public class BodyResponse {
         List messages = (List) jsonResult.get("errorMessages");
         return messages[0];
    	}
+
+    private String buildBasicAuthorizationString(String username, String password) {
+
+        String credentials = username + ":" + password;
+        return "Basic " + new String(new Base64().encode(credentials.getBytes()));
+    }
 }
