@@ -17,6 +17,7 @@ import groovy.transform.BaseScript;
 import groovy.json.JsonOutput;
 import groovy.json.JsonSlurper;
 import groovy.xml.MarkupBuilder;
+import groovy.xml.MarkupBuilderHelper;
 import groovyx.net.http.RESTClient;
 
 import javax.ws.rs.core.MultivaluedMap;
@@ -91,7 +92,11 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     // bullet
     String bullet = queryParams.getFirst("bullet");
     // debug
-    if (!queryParams.getFirst("debug")) {queryParams.putSingle("debug", "no")};
+    if (!queryParams.getFirst("onlylevel")) {queryParams.putSingle("onlylevel", "no")};
+	// For staging instance
+    if (!queryParams.getFirst("staging")) {queryParams.putSingle("staging", "no")};
+    // New html format
+    if (!queryParams.getFirst("new")) {queryParams.putSingle("new", "no")};
     // Checks mandatory parameters
     try {
         assert (report.toLowerCase() == "readme" || report.toLowerCase() == "releasenote") : "'model' parameter should be Readme ou Releasenote";
@@ -105,15 +110,17 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         responseBuilder = Response.status(Status.NOT_FOUND).type("text/plain").entity("Something is wrong: " + e.getMessage());
         return responseBuilder.build();
     }
-	queryParams.putSingle("report", report.toLowerCase())
-	queryParams.putSingle("type", typeDocument.toLowerCase())
-	queryParams.putSingle("format", format.toLowerCase())
-	queryParams.putSingle("component", component.toUpperCase())
-	queryParams.putSingle("header", header.toLowerCase())
-	queryParams.putSingle("files", files.toLowerCase())
+	queryParams.putSingle("report", report.toLowerCase());
+	queryParams.putSingle("type", typeDocument.toLowerCase());
+	queryParams.putSingle("format", format.toLowerCase());
+	queryParams.putSingle("component", component.toUpperCase());
+	queryParams.putSingle("header", header.toLowerCase());
+	queryParams.putSingle("files", files.toLowerCase());
+	queryParams.putSingle("onlylevel", ((String) queryParams.getFirst("onlylevel")).toLowerCase());
+	queryParams.putSingle("staging", ((String) queryParams.getFirst("staging")).toLowerCase());
 
 	// Base url
-    def baseURL = "https://jira-sage.valiantyscloud.net/rest/api/latest";
+	String baseURL = getAPIJiraSageUrl(queryParams);
     // Search API syntax
     def API = "/search";
     // JQL query
@@ -250,20 +257,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
                 }
             	break;
             case "releasenote":
-            	/*
-                StringWriter builderHead = new StringWriter();
-                MarkupBuilder markupBuilder = new groovy.xml.MarkupBuilder(builderHead);
-                markupBuilder.head () {
-                	title "RELEASE NOTES"
-                    script type: "text/javascript"
-                    link rel: "Stylesheet", type: "text/css", media: "all", href: "http://online-help.sageerpx3.com/erp/99/wp-static-content/news/en_US/ReleaseNote_11/ADXHelp_main.css"
-                }
-      			builder.append((String) builderHead.toString()); */
-       			// builder.append(getReleasenoteHeader());
-				builder.append(getReleasenoteHeader());
-				//builder.append(hDocument("RELEASE NOTES", 1, "", format));
-                //builder.append(hDocument(release, 2, "", format));
-            	break;
+				break;
         }
 
         // Body of document
@@ -271,7 +265,6 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         String fieldValue, breakValue;
         Map breakMap = (Map) jsonSlurper.parseText('{"breakFields":[]}');
         List breakFields = (List) breakMap.getAt("breakFields");
-        int hOffset;
         switch (report.toLowerCase()) {
             case "readme":
             	// fixVersions
@@ -285,7 +278,6 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             		// X3 Product Area
 					breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15522","subfield":{"name":"value","breakValue":""}}'));
                 }
-            	hOffset = 0;
             	break;
             case "releasenote":
             	// X3 Product Area
@@ -296,12 +288,18 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
 				breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15413","subfield":{"name":"value","breakValue":""},"level":"5","class":""}'));
             	// Feature
 				// breakFields.push((Map) jsonSlurper.parseText('{"field":"issuelinks","subfield":{"name":"summary","breakValue":""}}'));
-            	hOffset = 2;
+                if (queryParams.getFirst("new") == "no") {
+                    builder.append(getReleasenoteHeader());
+                }
             	break;
         }
 
-        // https://docs.oracle.com/javase/8/docs/api/java/util/List.html
         List issues = (List) jsonResult.get("issues");
+        if (queryParams.getFirst("new") != "no") {
+            // POC: call directly a function
+            builder.append(createReleaseNoteReport(release, issues, breakFields, queryParams));
+        } else {
+		// https://docs.oracle.com/javase/8/docs/api/java/util/List.html
         issues.each {
             Map issue = (Map) it;
     		String key = issue.get("key");
@@ -396,7 +394,6 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
                         // Write the value of the break field
 						Integer level = ((String) breakField.getAt("level")).toInteger();
 						String hclass = breakField.getAt("class");
-                        // builder.append(hDocument(fieldValue, idx+1+hOffset, anchor, hclass, format));
                         builder.append(hDocument(fieldValue, level, anchor, hclass, format));
                     }
                 }
@@ -409,10 +406,11 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
                 	break;
                 case "releasenote":
 					Map renderedFields = issue.get("renderedFields");
-        			builder.append(getReleasenoteBody(key, fields, renderedFields, queryParams));
+        			builder.append(getReleasenoteBodyIssue(key, fields, renderedFields, queryParams));
                 	break;
             }
 		};
+        }
 
         // Footer of document
         builder.append(footerDocument(format));
@@ -484,6 +482,20 @@ public static String getBullet(priority, String defaultBullet) {
     	return defaultBullet;
     }
 }
+
+public static String getAPIJiraSageUrl(MultivaluedMap queryParams) {
+    return getJiraSageUrl(queryParams) + "/rest/api/latest";
+} 
+
+public static String getJiraSageUrl(MultivaluedMap queryParams) {
+    String baseURL;
+    if (queryParams.getFirst("staging") == "no") {
+        baseURL = "https://jira-sage.valiantyscloud.net";
+    } else {
+        baseURL = "https://jira-sage-staging.valiantyscloud.net";
+    }
+    return baseURL;
+} 
 
 public static String getReadmeBody(String key, Map fields, MultivaluedMap queryParams) {
 	String format = queryParams.getFirst("format");
@@ -578,22 +590,169 @@ public static String getReadmeBody(String key, Map fields, MultivaluedMap queryP
     return builder.toString();
 }
 
+public static String createReleaseNoteReport(String releaseName, List issues, List breakFields, MultivaluedMap queryParams) {
+
+	def releases = [new Release(name:'2018 R3', month:"July", href:"MIS_90_10"),
+                    new Release(name:'2018 R2', month:"May", href:"MIS_80_10"),
+                    new Release(name:'2018 R1', month:"March", href:"MIS_70_10"),
+                    new Release(name:'2017 R7', month:"December", href:"MIS_60_10"),
+                    new Release(name:'2017 R6', month:"October", href:"MIS_50_10"),
+                    new Release(name:'2017 R4', month:"August", href:"MIS_40_10"),
+                    new Release(name:'2017 R2', month:"June", href:"MIS_30_10"),
+                    new Release(name:'2017 R1', month:"May", href:"MIS_20_10")
+                   ];
+	def release = releases.find {it.getName() == releaseName};
+
+	def writer = new StringWriter();
+    // MarkupBuilder markupBuilder = new MarkupBuilder(writer);
+    def builder = new MarkupBuilder(new IndentPrinter(new PrintWriter(writer), ""));
+    def mkp = new MarkupBuilderHelper(builder);
+    builder.html {
+        head {
+            meta ('http-equiv': 'Content-Type', content: 'text/html; charset=utf-8')
+            title ("getReport")
+            link (rel: "styleSheet", type:"text/css", media: "all", href: "ADXHelp_main.css")
+        }
+        body (id: "adx-help") {
+            div (id: "container") {
+                div (id: "linkList") {
+                    div (id: "linkList2") {
+                        div (id: "lmainmenu") {
+                            ul {
+                                li {
+                                    releases.each {
+										a (href:"#"+it.getHref(), it.getMonth())
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // div (id: "topNBLinks")
+            div (id: "pageHeader") {
+                h1 (class: "g1") {
+                    span ("RELEASE")
+                }
+                h1 (class: "h1_subtitle", "NOTES")
+            }
+            div (id: "supportingText") {
+                p "This page describes new functionality introduced for this and previous releases of Enterprise Management. Check this page for announcements about new or updated features and issues."
+                p {
+                    b "Sage X3"
+                    mkp.yield (" is now ")
+                    b "Enterprise Management"
+                    mkp.yield (". This name change was part of the recent launch of Sage Business Cloud, the one and only cloud platform designed for every stage of customer business growth.")
+                }
+                p {
+                    mkp.yield ("Visit ")
+                    a (href:'http://www.sage.com', target:"_blank", "sage.com")
+                    mkp.yield (" to learn more about what ")
+                    b "Sage Business Cloud"
+                    mkp.yield (" can do for you.")
+                }
+                // Begin 20?? R? release
+                mkp.comment("Begin ${release.getName()} release")
+                div (id: "stdBloc") {
+                    div (class: "links") {
+                        // TODO: add here Product Area links
+                    }
+                    // Release
+                    // a (name: release.getHref())
+                    h3 (class: "version", id: release.getName()) {
+                        a (name: release.getHref()) {}
+                        mkp.yield (release.getMonth().toUpperCase())
+                    }
+                    // hr ()	// add horizontal line
+                    // Loop on each issues
+                    String key;
+                    Map issue, fields, renderedFields;
+                    issues.each {
+                        issue = (Map) it;
+                        key = issue.get("key");
+                        fields = issue.get("fields");
+                        renderedFields = issue.get("renderedFields");
+
+						// issue summary
+                        writeSummary (builder, writer, key, fields, renderedFields, queryParams);
+                    }
+                }
+            }
+        }
+    }
+	return '<!DOCTYPE html>' + writer.toString()
+}
+
+public static void writeSummary(MarkupBuilder builder, StringWriter writer, String key, Map fields, Map renderedFields, MultivaluedMap queryParams) {
+	def wikiNote = (queryParams.getFirst("staging") == "yes");
+
+	if (fields) {
+        // issuetype
+        String issuetype = ((Map) fields.get("issuetype")).get("name");
+		// summary and note
+        String summary, releaseNote;
+        if (issuetype == "Epic") {
+            // for Epic
+        	summary = fields.get("customfield_10801");
+            if (wikiNote) {
+        		releaseNote = renderedFields.get("customfield_14806");
+            } else {
+        		releaseNote = fields.get("customfield_14806");
+            }
+        } else {
+            // for Bug (behavior change)
+        	summary = fields.get("summary");
+        	releaseNote = fields.get("customfield_15118");
+        }
+        if (releaseNote == "See comment") {
+            // Comments (for POC, get the comment as the release note field)
+            Map comment = renderedFields.get("comment");
+            if (comment) {
+                List comments = (List) comment.getAt("comments");
+                if (comments) {
+                    releaseNote = comments[0].getAt("body");
+                    wikiNote = true;
+                }
+            }
+        }
+
+        // Write into builder
+		builder.div (key: "$key"){
+            u {h5 summary}
+            if (wikiNote) {
+        		writer.append(releaseNote);
+            } else {
+            	p releaseNote
+            }
+        }
+	}
+}
+
 public static String getReleasenoteHeader() {
     StringWriter builder = new StringWriter();
     MarkupBuilder markupBuilder = new groovy.xml.MarkupBuilder(builder);
-    markupBuilder.head () {
-        title "RELEASE NOTES"
-        //script (type: "text/javascript")
-        link rel: "Stylesheet", type: "text/css", media: "all", href: "http://online-help.sageerpx3.com/erp/99/wp-static-content/news/en_US/ReleaseNote_11/ADXHelp_main.css"
-    }
+        markupBuilder.head () {
+            //script (type: "text/javascript")
+            if (true) {
+            	// link rel: "Stylesheet", type: "text/css", media: "all", href: "http://online-help.sageerpx3.com/erp/99/wp-static-content/news/en_US/ReleaseNote_11/ADXHelp_main.css"
+            	link rel: "stylesheet", type: "text/css", media: "all", href: "ADXHelp_main.css"
+            } else {
+                // for example...
+                style {
+                    h1 color: "blue";
+                }
+            }
+        }
 	return builder.toString();
 }
 
-public static String getReleasenoteBody(String key, Map fields, Map renderedFields, MultivaluedMap queryParams) {
-    StringWriter builder = new StringWriter();
-    MarkupBuilder markupBuilder = new groovy.xml.MarkupBuilder(builder);
+public static String getReleasenoteBodyIssue(String key, Map fields, Map renderedFields, MultivaluedMap queryParams) {
+    def builder = new StringWriter();
+    def markupBuilder = new MarkupBuilder(builder);
+    def writer = new StringWriter();
+	def wikiNote = (queryParams.getFirst("staging") == "yes");
 
-    if (fields) {
+	if (fields) {
         // issuetype
         String issuetype = ((Map) fields.get("issuetype")).get("name");
 		// summary and note
@@ -601,19 +760,25 @@ public static String getReleasenoteBody(String key, Map fields, Map renderedFiel
         if (issuetype == "Epic") {
             // Epic
         	summary = fields.get("customfield_10801");
-        	releaseNote = fields.get("customfield_14806");
+            if (wikiNote) {
+        		releaseNote = renderedFields.get("customfield_14806");
+            } else {
+        		releaseNote = fields.get("customfield_14806");
+            }
         } else {
             // Bug
         	summary = fields.get("summary");
         	releaseNote = fields.get("customfield_15118");
         }
-		// Comments (for POC, get the comment as the release note field)
-        Map comment = renderedFields.get("comment");
-        String newReleaseNote;
-        if (comment) {
-            List comments = (List) comment.getAt("comments");
-            if (comments) {
-                releaseNote = comments[0].getAt("body");
+        if (releaseNote == "See comment") {
+            // Comments (for POC, get the comment as the release note field)
+            Map comment = renderedFields.get("comment");
+            if (comment) {
+                List comments = (List) comment.getAt("comments");
+                if (comments) {
+                    releaseNote = comments[0].getAt("body");
+                    wikiNote = true;
+                }
             }
         }
 		// Feature (inwardIssue, member of issuelinks)
@@ -637,10 +802,6 @@ public static String getReleasenoteBody(String key, Map fields, Map renderedFiel
             }
         }
 
-        def backgroundColor = "transparent";
-        if (queryParams.getFirst("type") == "internal") {
-        	backgroundColor = "lightyellow";
-		}
 /*
 mkp.html{
    head{ 
@@ -675,32 +836,48 @@ builder.html {
   } 
 }
 */
-		markupBuilder.div (style: "background-color:$backgroundColor", id:"$key") {
-        	// title ('Heading')
-            if (queryParams.getFirst("debug") == "yes") {
-        		String productArea = ((Map) fields.get("customfield_15522")).get("value");
+        def backgroundColor = "transparent";
+        if (queryParams.getFirst("type") == "internal") {
+        	backgroundColor = "lightyellow";
+		}
+		String url = getJiraSageUrl(queryParams);
+
+        markupBuilder.div (style: "background-color:$backgroundColor", id:"$key") {
+            // title ('Heading')
+            if (queryParams.getFirst("onlylevel") == "yes") {
+                String productArea = ((Map) fields.get("customfield_15522")).get("value");
                 p "[$productArea][$issuetype][$key] $summary"
             } else {
                 p {
                     if (queryParams.getFirst("type") == "internal") {
-                    	a (href:"https://jira-sage.valiantyscloud.net/browse/$key", "$summary [$key]")
+                        a (href:"$url/browse/$key", "$summary [$key]")
                     } else {
-						u summary
+                        u summary
                     }
                 }
-                p releaseNote
-                if (false && newReleaseNote) {
-                    p newReleaseNote
+                if (!wikiNote) {
+                    p releaseNote
                 }
-				/*
-                if (summaryFeature && summaryFeature != "") {
-                    p summaryFeature + " [JIRA#$keyFeature]"
-                }*/
+                /* if (summaryFeature && summaryFeature != "") {p summaryFeature + " [JIRA#$keyFeature]"} */
             }
-		}
+        }
+		// releaseNote is directly in html format
+        if (wikiNote) {
+            def wikireleaseNote;
+        	if (queryParams.getFirst("type") == "internal") {
+                wikireleaseNote = '<div style="background-color:lightblue">' + releaseNote + '</div>';
+            } else {
+                wikireleaseNote = releaseNote;
+            }
+			writer.append(wikireleaseNote);
+            // Video
+            if (key == "X3-22204") {
+            	writer.append('<video width="320" height="240" controls><source src="https://www.w3schools.com/tags/movie.mp4" type="video/mp4">Your browser does not support the video tag.</video>');
+            }
+        }
     }
 
-    return builder.toString();
+    return builder.toString() + System.getProperty("line.separator") + writer.toString();
 }
 
 public static String headerDocument(String format) {
@@ -1090,4 +1267,25 @@ public class BodyResponse {
         String credentials = username + ":" + password;
         return "Basic " + new String(new Base64().encode(credentials.getBytes()));
     }
+}
+
+public class Release {
+    private String name;
+    private String month;
+    private String href;
+
+    public String getName() {
+      	return name;
+   	}
+	public String getMonth() {
+      	return month;
+   	}
+    public String getHref() {
+      	return href;
+    }
+}
+
+class Person {
+    String name
+    int age
 }
