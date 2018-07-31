@@ -269,23 +269,23 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             case "readme":
             	// fixVersions
                 if (false) {
-                    breakFields.push((Map) jsonSlurper.parseText('{"field":"fixVersions","subfield":{"name":"name","breakValue":""}}'));
+                    breakFields.push((Map) jsonSlurper.parseText('{"field":"fixVersions","subfield":{"name":"name","breakValue":""},"level":0,"class":""}'));
                 }
             	// issuetype (Bug, Entry Point)
-            	breakFields.push((Map) jsonSlurper.parseText('{"field":"issuetype","subfield":{"name":"name","breakValue":""}}'));
+            	breakFields.push((Map) jsonSlurper.parseText('{"field":"issuetype","subfield":{"name":"name","breakValue":""},"level":0,"class":""}'));
             	// For Syracuse, break only
             	if (component.toLowerCase() != "syracuse") {
             		// X3 Product Area
-					breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15522","subfield":{"name":"value","breakValue":""}}'));
+					breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15522","subfield":{"name":"value","breakValue":""},"level":0,"class":""}'));
                 }
             	break;
             case "releasenote":
             	// X3 Product Area
-            	breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15522","subfield":{"name":"value","breakValue":""},"level":"3","class":"g1"}'));
+            	breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15522","subfield":{"name":"value","breakValue":""},"level":3,"class":"g1"}'));
             	// issuetype
-				breakFields.push((Map) jsonSlurper.parseText('{"field":"issuetype","subfield":{"name":"name","breakValue":""},"level":"3","class":"changes"}'));
+				breakFields.push((Map) jsonSlurper.parseText('{"field":"issuetype","subfield":{"name":"name","breakValue":""},"level":3,"class":"changes"}'));
             	// X3 Legislation
-				breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15413","subfield":{"name":"value","breakValue":""},"level":"5","class":""}'));
+				breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15413","subfield":{"name":"value","breakValue":""},"level":5,"class":""}'));
             	// Feature
 				// breakFields.push((Map) jsonSlurper.parseText('{"field":"issuelinks","subfield":{"name":"summary","breakValue":""}}'));
                 if (queryParams.getFirst("new") == "no") {
@@ -592,21 +592,29 @@ public static String getReadmeBody(String key, Map fields, MultivaluedMap queryP
 
 public static String createReleaseNoteReport(String releaseName, List issues, List breakFields, MultivaluedMap queryParams) {
 
-	def releases = [new Release(name:'2018 R3', month:"July", href:"MIS_90_10"),
-                    new Release(name:'2018 R2', month:"May", href:"MIS_80_10"),
-                    new Release(name:'2018 R1', month:"March", href:"MIS_70_10"),
-                    new Release(name:'2017 R7', month:"December", href:"MIS_60_10"),
-                    new Release(name:'2017 R6', month:"October", href:"MIS_50_10"),
-                    new Release(name:'2017 R4', month:"August", href:"MIS_40_10"),
-                    new Release(name:'2017 R2', month:"June", href:"MIS_30_10"),
-                    new Release(name:'2017 R1', month:"May", href:"MIS_20_10")
+	def releases = [new Release(name:'2018 R6', month:"July", href:"MIS_2018R6"),
+                    new Release(name:'2018 R5', month:"July", href:"MIS_2018R5"),
+                    new Release(name:'2018 R4', month:"July", href:"MIS_2018R4"),
+        			new Release(name:'2018 R3', month:"July", href:"MIS_2018R3"),
+                    new Release(name:'2018 R2', month:"May", href:"MIS_2018R2"),
+                    new Release(name:'2018 R1', month:"March", href:"MIS_2018R1"),
+                    new Release(name:'2017 R7', month:"December", href:"MIS_2017R7"),
+                    new Release(name:'2017 R6', month:"October", href:"MIS_2017R6"),
+                    new Release(name:'2017 R4', month:"August", href:"MIS_2017R4"),
+                    new Release(name:'2017 R2', month:"June", href:"MIS_2017R2"),
+                    new Release(name:'2017 R1', month:"May", href:"MIS_2017R1")
                    ];
 	def release = releases.find {it.getName() == releaseName};
+
+	def productAreas = [new ProductArea(name:'Finance', href:"MIS_FINAN"),
+                       	new ProductArea(name:'Distribution', href:"MIS_DISTR"),
+                       	new ProductArea(name:'Manufacturing', href:"MIS_MANUF")];
 
 	def writer = new StringWriter();
     // MarkupBuilder markupBuilder = new MarkupBuilder(writer);
     def builder = new MarkupBuilder(new IndentPrinter(new PrintWriter(writer), ""));
-    def mkp = new MarkupBuilderHelper(builder);
+	def mkp = builder.getMkp();
+    // def mkp = new MarkupBuilderHelper(builder);
     builder.html {
         head {
             meta ('http-equiv': 'Content-Type', content: 'text/html; charset=utf-8')
@@ -618,10 +626,11 @@ public static String createReleaseNoteReport(String releaseName, List issues, Li
                 div (id: "linkList") {
                     div (id: "linkList2") {
                         div (id: "lmainmenu") {
+                            // List of releases
                             ul {
                                 li {
                                     releases.each {
-										a (href:"#"+it.getHref(), it.getMonth())
+										a (href: "#"+it.getHref(), it.getMonth())
                                     }
                                 }
                             }
@@ -651,17 +660,33 @@ public static String createReleaseNoteReport(String releaseName, List issues, Li
                     b "Sage Business Cloud"
                     mkp.yield (" can do for you.")
                 }
-                // Begin 20?? R? release
-                mkp.comment("Begin ${release.getName()} release")
+
+				// Begin given release
+                mkp.comment ("Begin ${release.getName()} release")
                 div (id: "stdBloc") {
                     div (class: "links") {
-                        // TODO: add here Product Area links
+                        // List of Product Area
+                        ul {
+                            def href, name;
+                            productAreas.each {
+                                href = it.getHref();
+                                name = it.getName();
+                                li {a (href: "#"+href, name)}
+                            }
+                        }
                     }
                     // Release
-                    // a (name: release.getHref())
+                    // a (id: release.getHref())
                     h3 (class: "version", id: release.getName()) {
-                        a (name: release.getHref()) {}
+                        // a (id: release.getHref())
                         mkp.yield (release.getMonth().toUpperCase())
+                    }
+                    // add Readme link (if necessary)
+                    p {
+                        mkp.yield ("Refer to the ")
+                        a (href: "README_ENG_2017R2.txt", target: "_blank", "Readme")
+                        // mkp.comment ("insert link here")
+                        mkp.yield (" document for updates on bug fixes.")
                     }
                     // hr ()	// add horizontal line
                     // Loop on each issues
@@ -669,11 +694,16 @@ public static String createReleaseNoteReport(String releaseName, List issues, Li
                     Map issue, fields, renderedFields;
                     issues.each {
                         issue = (Map) it;
-                        key = issue.get("key");
                         fields = issue.get("fields");
-                        renderedFields = issue.get("renderedFields");
+
+                        // break fields
+						breakFields.eachWithIndex {breakField, idx ->
+                        	writeHeaders (builder, writer, breakField, fields, queryParams, release.getName());
+						}
 
 						// issue summary
+                        key = issue.get("key");
+                        renderedFields = issue.get("renderedFields");
                         writeSummary (builder, writer, key, fields, renderedFields, queryParams);
                     }
                 }
@@ -681,6 +711,82 @@ public static String createReleaseNoteReport(String releaseName, List issues, Li
         }
     }
 	return '<!DOCTYPE html>' + writer.toString()
+}
+
+public static void writeHeaders(MarkupBuilder builder, StringWriter writer, Map breakField, Map fields, MultivaluedMap queryParams, String release) {
+    String breakFieldName = breakField.getAt("field");
+    Map breakSubfield = (Map) breakField.getAt("subfield");
+
+	// Get the last breakfield value
+    String breakValue = breakSubfield.getAt("breakValue");
+    // Get the field value
+    String fieldValue = getFieldValue(breakFieldName, breakSubfield, fields, release)
+    switch (fieldValue) {
+        case "Bug":
+            if (breakFieldName == "issuetype") {
+                fieldValue = "CHANGES";
+            }
+        	break;
+        case "Epic":
+            if (breakFieldName == "issuetype") {
+                fieldValue = "FEATURES";
+            }
+        	break;
+    }
+
+	if (fieldValue != breakValue) {
+		// Write the value of the break field
+        Integer level = ((String) breakField.getAt("level")).toInteger();
+        String headerClass = breakField.getAt("class");
+        switch (level) {
+            case 1:
+            builder.h1 (class: headerClass, fieldValue)
+            break;
+            case 2:
+            builder.h2 (class: headerClass, fieldValue)
+            break;
+            case 3:
+            builder.h3 (class: headerClass, fieldValue)
+            break;
+            case 4:
+            builder.h4 (class: headerClass, fieldValue)
+            break;
+            case 5:
+            builder.h5 (class: headerClass, fieldValue)
+            break;
+        }
+        
+        // Update the last break value
+        breakSubfield.putAt("breakValue", fieldValue);
+    }
+}
+
+/*
+Get the value property of a field
+*/
+private static String getFieldValue(String breakFieldName, Map breakSubfield, Map fields, String release) {
+    String fieldValue;
+    switch (breakFieldName) {
+        case "fixVersions":
+            List fixVersions = (List) fields.getAt(breakFieldName);
+            fixVersions.each {
+                Map fixVersion = (Map) it;
+                if (fixVersion) {
+                    String name = fixVersion.get("name");
+                    if (name.indexOf(release) >= 0) {
+                        fieldValue = name;
+                        return;
+                    }
+                }
+            }
+        	break;
+        default :
+            Map field = fields.get(breakFieldName);
+            if (field) {
+                fieldValue = field.get(breakSubfield.getAt("name"));
+            }
+    }
+    return fieldValue;
 }
 
 public static void writeSummary(MarkupBuilder builder, StringWriter writer, String key, Map fields, Map renderedFields, MultivaluedMap queryParams) {
@@ -693,7 +799,7 @@ public static void writeSummary(MarkupBuilder builder, StringWriter writer, Stri
         String summary, releaseNote;
         if (issuetype == "Epic") {
             // for Epic
-        	summary = fields.get("customfield_10801");
+        	summary = fields.get("customfield_10801");	// Epic name
             if (wikiNote) {
         		releaseNote = renderedFields.get("customfield_14806");
             } else {
@@ -702,10 +808,10 @@ public static void writeSummary(MarkupBuilder builder, StringWriter writer, Stri
         } else {
             // for Bug (behavior change)
         	summary = fields.get("summary");
-        	releaseNote = fields.get("customfield_15118");
+        	releaseNote = fields.get("customfield_15118");	// X3 Solution Detail
         }
+        // Comments (for POC, get the comment as the release note field)
         if (releaseNote == "See comment") {
-            // Comments (for POC, get the comment as the release note field)
             Map comment = renderedFields.get("comment");
             if (comment) {
                 List comments = (List) comment.getAt("comments");
@@ -717,8 +823,17 @@ public static void writeSummary(MarkupBuilder builder, StringWriter writer, Stri
         }
 
         // Write into builder
+		String url = getJiraSageUrl(queryParams);
 		builder.div (key: "$key"){
-            u {h5 summary}
+            if (queryParams.getFirst("type") == "internal") {
+                u {
+                    h5 {
+                        a (href:"$url/browse/$key", "$summary [$key]")
+                    }
+                }
+            } else {
+				u {h5 summary}
+            }
             if (wikiNote) {
         		writer.append(releaseNote);
             } else {
@@ -1279,6 +1394,18 @@ public class Release {
    	}
 	public String getMonth() {
       	return month;
+   	}
+    public String getHref() {
+      	return href;
+    }
+}
+
+public class ProductArea {
+    private String name;
+    private String href;
+
+	public String getName() {
+      	return name;
    	}
     public String getHref() {
       	return href;
