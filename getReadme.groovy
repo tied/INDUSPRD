@@ -156,7 +156,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         // Issue type
         Jql += " AND issuetype in (Epic, Bug)";
         // Status
-        Jql += " AND status=Done";
+        Jql += " AND status in (DONE, 'X3 ALL US DONE')";
         // 
         Jql += " AND (";
         Jql += "(issuetype=Epic AND 'X3 Release Note Check'='To be communicated')";	//Features
@@ -269,23 +269,23 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             case "readme":
             	// fixVersions
                 if (false) {
-                    breakFields.push((Map) jsonSlurper.parseText('{"field":"fixVersions","subfield":{"name":"name","breakValue":""},"level":0,"class":""}'));
+                    breakFields.push((Map) jsonSlurper.parseText('{"item":0,"field":"fixVersions","subfield":{"name":"name","breakValue":""},"head":0,"class":""}'));
                 }
             	// issuetype (Bug, Entry Point)
-            	breakFields.push((Map) jsonSlurper.parseText('{"field":"issuetype","subfield":{"name":"name","breakValue":""},"level":0,"class":""}'));
+            	breakFields.push((Map) jsonSlurper.parseText('{"item":1,"field":"issuetype","subfield":{"name":"name","breakValue":""},"head":0,"class":""}'));
             	// For Syracuse, break only
             	if (component.toLowerCase() != "syracuse") {
             		// X3 Product Area
-					breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15522","subfield":{"name":"value","breakValue":""},"level":0,"class":""}'));
+					breakFields.push((Map) jsonSlurper.parseText('{"item":2,"field":"customfield_15522","subfield":{"name":"value","breakValue":""},"head":0,"class":""}'));
                 }
             	break;
             case "releasenote":
             	// X3 Product Area
-            	breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15522","subfield":{"name":"value","breakValue":""},"level":3,"class":"g1"}'));
+            	breakFields.push((Map) jsonSlurper.parseText('{"item":0,"field":"customfield_15522","subfield":{"name":"value","breakValue":""},"head":3,"class":"g1"}'));
             	// issuetype
-				breakFields.push((Map) jsonSlurper.parseText('{"field":"issuetype","subfield":{"name":"name","breakValue":""},"level":3,"class":"changes"}'));
+				breakFields.push((Map) jsonSlurper.parseText('{"item":1,"field":"issuetype","subfield":{"name":"name","breakValue":""},"head":3,"class":"changes"}'));
             	// X3 Legislation
-				breakFields.push((Map) jsonSlurper.parseText('{"field":"customfield_15413","subfield":{"name":"value","breakValue":""},"level":5,"class":""}'));
+				breakFields.push((Map) jsonSlurper.parseText('{"item":2,"field":"customfield_15413","subfield":{"name":"value","breakValue":""},"head":5,"class":""}'));
             	// Feature
 				// breakFields.push((Map) jsonSlurper.parseText('{"field":"issuelinks","subfield":{"name":"summary","breakValue":""}}'));
                 if (queryParams.getFirst("new") == "no") {
@@ -392,7 +392,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
                             	break;
                         }
                         // Write the value of the break field
-						Integer level = ((String) breakField.getAt("level")).toInteger();
+						Integer level = ((String) breakField.getAt("head")).toInteger();
 						String hclass = breakField.getAt("class");
                         builder.append(hDocument(fieldValue, level, anchor, hclass, format));
                     }
@@ -592,28 +592,31 @@ public static String getReadmeBody(String key, Map fields, MultivaluedMap queryP
 
 public static String createReleaseNoteReport(String releaseName, List issues, List breakFields, MultivaluedMap queryParams) {
 
-	def releases = [new Release(name:'2018 R6', month:"July", href:"MIS_2018R6"),
-                    new Release(name:'2018 R5', month:"July", href:"MIS_2018R5"),
-                    new Release(name:'2018 R4', month:"July", href:"MIS_2018R4"),
-        			new Release(name:'2018 R3', month:"July", href:"MIS_2018R3"),
-                    new Release(name:'2018 R2', month:"May", href:"MIS_2018R2"),
-                    new Release(name:'2018 R1', month:"March", href:"MIS_2018R1"),
-                    new Release(name:'2017 R7', month:"December", href:"MIS_2017R7"),
-                    new Release(name:'2017 R6', month:"October", href:"MIS_2017R6"),
-                    new Release(name:'2017 R4', month:"August", href:"MIS_2017R4"),
-                    new Release(name:'2017 R2', month:"June", href:"MIS_2017R2"),
-                    new Release(name:'2017 R1', month:"May", href:"MIS_2017R1")
+	def releases = [new Release(name:'2018 R7', month:"July 2018", href:"MIS_2018R7"),
+        			new Release(name:'2018 R6', month:"July 2018", href:"MIS_2018R6"),
+                    new Release(name:'2018 R5', month:"July 2018", href:"MIS_2018R5"),
+                    new Release(name:'2018 R4', month:"July 2018", href:"MIS_2018R4"),
+        			new Release(name:'2018 R3', month:"July 2018", href:"MIS_2018R3"),
+                    new Release(name:'2018 R2', month:"May 2018", href:"MIS_2018R2"),
+                    new Release(name:'2018 R1', month:"March 2018", href:"MIS_2018R1"),
+                    new Release(name:'2017 R7', month:"December 2017", href:"MIS_2017R7"),
+                    new Release(name:'2017 R6', month:"October 2017", href:"MIS_2017R6"),
+                    new Release(name:'2017 R4', month:"August 2017", href:"MIS_2017R4"),
+                    new Release(name:'2017 R2', month:"June 2017", href:"MIS_2017R2"),
+                    new Release(name:'2017 R1', month:"May 2017", href:"MIS_2017R1")
                    ];
 	def release = releases.find {it.getName() == releaseName};
 
 	def productAreas = [new ProductArea(name:'Finance', href:"MIS_FINAN"),
                        	new ProductArea(name:'Distribution', href:"MIS_DISTR"),
-                       	new ProductArea(name:'Manufacturing', href:"MIS_MANUF")];
+                       	new ProductArea(name:'Manufacturing', href:"MIS_MANUF"),
+                       	new ProductArea(name:'Projects', href:"MIS_PROJ")];
 
 	def writer = new StringWriter();
     // MarkupBuilder markupBuilder = new MarkupBuilder(writer);
     def builder = new MarkupBuilder(new IndentPrinter(new PrintWriter(writer), ""));
 	def mkp = builder.getMkp();
+	builder.setOmitEmptyAttributes(true);
     // def mkp = new MarkupBuilderHelper(builder);
     builder.html {
         head {
@@ -630,7 +633,13 @@ public static String createReleaseNoteReport(String releaseName, List issues, Li
                             ul {
                                 li {
                                     releases.each {
-										a (href: "#"+it.getHref(), it.getMonth())
+                                        def curRelease;
+                                        if (queryParams.getFirst("type") == "internal") {
+                                            curRelease = it.getName();
+                                        } else {
+                                            curRelease = it.getMonth();
+                                        }
+                                        a (href: "#"+it.getHref(), curRelease)
                                     }
                                 }
                             }
@@ -638,7 +647,9 @@ public static String createReleaseNoteReport(String releaseName, List issues, Li
                     }
                 }
             }
-            // div (id: "topNBLinks")
+            div (id: "topNBLinks", style: "hidden") {
+                a (href: "../index.htm", "Index")
+            }
             div (id: "pageHeader") {
                 h1 (class: "g1") {
                     span ("RELEASE")
@@ -663,8 +674,11 @@ public static String createReleaseNoteReport(String releaseName, List issues, Li
 
 				// Begin given release
                 mkp.comment ("Begin ${release.getName()} release")
-                div (id: "stdBloc") {
+                div (class: "stdBloc") {
                     div (class: "links") {
+                        h3 (class: "g1") {
+                            span {}
+                        }
                         // List of Product Area
                         ul {
                             def href, name;
@@ -676,20 +690,27 @@ public static String createReleaseNoteReport(String releaseName, List issues, Li
                         }
                     }
                     // Release
-                    // a (id: release.getHref())
-                    h3 (class: "version", id: release.getName()) {
-                        // a (id: release.getHref())
-                        mkp.yield (release.getMonth().toUpperCase())
+                    def curRelease;
+                    if (queryParams.getFirst("type") == "internal") {
+                        curRelease = release.getName();
+                    } else {
+                        curRelease = release.getMonth().toUpperCase();
                     }
+                    h3 (class: "version", id: release.getName(), curRelease)
+                    /*
+                    h3 (class: "version", id: release.getName()) {
+                        mkp.yield (release.getMonth().toUpperCase())
+                    }*/
                     // add Readme link (if necessary)
                     p {
                         mkp.yield ("Refer to the ")
-                        a (href: "README_ENG_2017R2.txt", target: "_blank", "Readme")
+                        a (href: "/README_ENG_2017R2.txt", target: "_blank", "Readme")
                         // mkp.comment ("insert link here")
                         mkp.yield (" document for updates on bug fixes.")
                     }
-                    // hr ()	// add horizontal line
+
                     // Loop on each issues
+					// hr ()	// add horizontal line
                     String key;
                     Map issue, fields, renderedFields;
                     issues.each {
@@ -698,7 +719,21 @@ public static String createReleaseNoteReport(String releaseName, List issues, Li
 
                         // break fields
 						breakFields.eachWithIndex {breakField, idx ->
-                        	writeHeaders (builder, writer, breakField, fields, queryParams, release.getName());
+def wbreakValue = ((Map) breakField.getAt("subfield")).getAt("breakValue");
+p ("$idx> $wbreakValue")
+                        	if (writeHeaders (builder, breakField, fields, queryParams, release, productAreas)) {
+                                // Reset all descendant level
+								def followingBreaks = breakFields.findAll {(int) breakField.getAt("item") > idx};
+                                if (followingBreaks) {
+                                	breakFields.each {
+    									Map breakSubfield = (Map) it.getAt("subfield");
+                                        if (breakSubfield) {
+                                            p (">"+breakSubfield.getAt("breakValue")+"<")
+        									breakSubfield.putAt("breakValue", "");
+                                        }
+                                    }
+								}
+                            }
 						}
 
 						// issue summary
@@ -713,51 +748,63 @@ public static String createReleaseNoteReport(String releaseName, List issues, Li
 	return '<!DOCTYPE html>' + writer.toString()
 }
 
-public static void writeHeaders(MarkupBuilder builder, StringWriter writer, Map breakField, Map fields, MultivaluedMap queryParams, String release) {
+public static boolean writeHeaders(MarkupBuilder builder, Map breakField, Map fields, MultivaluedMap queryParams, Release release, List<ProductArea> productAreas) {
     String breakFieldName = breakField.getAt("field");
     Map breakSubfield = (Map) breakField.getAt("subfield");
 
 	// Get the last breakfield value
     String breakValue = breakSubfield.getAt("breakValue");
     // Get the field value
-    String fieldValue = getFieldValue(breakFieldName, breakSubfield, fields, release)
-    switch (fieldValue) {
-        case "Bug":
-            if (breakFieldName == "issuetype") {
-                fieldValue = "CHANGES";
-            }
-        	break;
-        case "Epic":
-            if (breakFieldName == "issuetype") {
-                fieldValue = "FEATURES";
-            }
-        	break;
-    }
+    String fieldValue = getFieldValue(breakFieldName, breakSubfield, fields, release.getName())
 
 	if (fieldValue != breakValue) {
-		// Write the value of the break field
-        Integer level = ((String) breakField.getAt("level")).toInteger();
-        String headerClass = breakField.getAt("class");
-        switch (level) {
-            case 1:
-            builder.h1 (class: headerClass, fieldValue)
-            break;
-            case 2:
-            builder.h2 (class: headerClass, fieldValue)
-            break;
-            case 3:
-            builder.h3 (class: headerClass, fieldValue)
-            break;
-            case 4:
-            builder.h4 (class: headerClass, fieldValue)
-            break;
-            case 5:
-            builder.h5 (class: headerClass, fieldValue)
-            break;
-        }
-        
         // Update the last break value
         breakSubfield.putAt("breakValue", fieldValue);
+
+		// Write the value of the break field
+        Integer level = ((String) breakField.getAt("head")).toInteger();
+        String headerClass = breakField.getAt("class");
+        // Search the href of current 'X3 Product Area'
+        String anchor;
+        switch (breakFieldName) {
+            case "customfield_15522":
+            	// Get the anchor
+                ProductArea productArea = productAreas.find {it.getName() == fieldValue};
+                if (productArea) {
+                    anchor = productArea.getHref();
+                }
+                break;
+            case "issuetype":
+            	// Change Bug to CHANGES and Epic to FEATURES
+                if (fieldValue == "Bug") {
+                    fieldValue = "CHANGES";
+                } else if (fieldValue == "Epic") {
+                    fieldValue = "FEATURES";
+                }
+            	break;
+            default :
+            	anchor = "";
+        }
+		switch (level) {
+            case 1:
+            builder.h1 (class: headerClass, id: anchor, fieldValue)
+            break;
+            case 2:
+            builder.h2 (class: headerClass, id: anchor, fieldValue)
+            break;
+            case 3:
+            builder.h3 (class: headerClass, id: anchor, fieldValue)
+            break;
+            case 4:
+            builder.h4 (class: headerClass, id: anchor, fieldValue)
+            break;
+            case 5:
+            builder.h5 (class: headerClass, id: anchor, fieldValue)
+            break;
+        }
+        return true;
+	} else {
+        return false;
     }
 }
 
