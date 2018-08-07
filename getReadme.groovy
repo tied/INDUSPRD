@@ -29,9 +29,12 @@ import java.net.URLEncoder;
 import java.net.HttpURLConnection;
 import java.util.regex.*;
 import java.util.regex.Pattern;
-
 import javax.swing.text.html.HTMLDocument;
 import javax.swing.JEditorPane;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.nio.channels.FileChannel;
 
 import static java.util.stream.Collectors.joining;
 
@@ -75,6 +78,9 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     // format: text(default), html
     String format = queryParams.getFirst("format");
     if (!format) {format = "text"};
+    // product: x3(default), x3p(people)
+    if (!queryParams.getFirst("product")) {queryParams.putSingle("product", "X3")};
+    String product = queryParams.getFirst("product");
     // keys: JIRA keys for testing 'X3-111,X3-222,...'
     String keys = queryParams.getFirst("keys");
     // filterid: filter id or if null, keep the jql programmed
@@ -101,11 +107,13 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     try {
         assert (report.toLowerCase() == "readme" || report.toLowerCase() == "releasenote") : "'model' parameter should be Readme ou Releasenote";
         assert (typeDocument.toLowerCase() == "internal" || typeDocument.toLowerCase() == "external") : "'type' parameter should be Internal ou External";
-        if (!filterId && !keys) {
+        assert (product.toUpperCase() == "X3" || product.toUpperCase() == "HR") : "'product' parameter should be X3 or HR";
+		if (!filterId && !keys) {
         	assert (release) : "'release' parameter is mandatory";
         }
         assert (format.toLowerCase() == "text" || format.toLowerCase() == "html") : "'format' parameter should be text ou html";
-        assert (component.toUpperCase() == "X3" || component.toLowerCase() == "syracuse") : "if given, 'component' parameter should be set to Syracuse";
+        // Cpmponents
+        assert (component.toUpperCase() == "X3" || component.toLowerCase() == "syracuse" || component.toLowerCase() == "java" || component.toLowerCase() == "console" || component.toLowerCase() == "print") : "if given, 'component' parameter should be set to Syracuse, Java, console or Print";
     } catch (AssertionError e) {
         responseBuilder = Response.status(Status.NOT_FOUND).type("text/plain").entity("Something is wrong: " + e.getMessage());
         return responseBuilder.build();
@@ -148,32 +156,45 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         }
         Jql += " AND issuekey not in ('X3-49153')";
         // Order
-        Jql += " ORDER BY issuetype DESC, 'X3 Product Area' ASC, priority";
-
+        // Fix Version/s
+        Jql += " ORDER BY";
+        if (component) {
+        	Jql += " fixVersion DESC,";
+        }
+        Jql += " issuetype DESC, 'X3 Product Area' ASC, priority";
         // fields: X3 Solution Details(15118), X3 Product Area(15522), X3 Maintenances(15112), X3 Regression(15110)
-        query = "&fields=summary,customfield_15118,customfield_15522,customfield_15112,issuetype,priority,customfield_15110,fixVersions";
+        query = "&fields=summary,customfield_15118,customfield_15522,customfield_15112,issuetype,priority,customfield_15110,customfield_13411,fixVersions";
     } else if (report.toLowerCase() == "releasenote") {
         // Issue type
         Jql += " AND issuetype in (Epic, Bug)";
         // Status
         Jql += " AND status in (DONE, 'X3 ALL US DONE')";
+        // TODO: change status 'X3 ALL US DONE' to Done category
         // 
         Jql += " AND (";
         Jql += "(issuetype=Epic AND 'X3 Release Note Check'='To be communicated')";	//Features
         Jql += " OR (issuetype=Bug AND 'X3 Behaviour Change'=Yes)";	// Changes
         Jql += ")";
         // Releases
-        Jql += " AND fixVersion in versionMatch('^"+release+"')";
+        if (release) {
+        	Jql += " AND fixVersion in versionMatch('^"+release+"')";
+        }
+        // Product
+        if (((String) queryParams.getFirst("product")).toUpperCase() == "X3") {
+            Jql += " AND 'X3 Product Area' not in (People)";
+        } else {
+            Jql += " AND 'X3 Product Area' in (People)";
+        }
         // JIRA keys (optionnal)
         if (keys) {
             Jql += " AND issuekey in ("+keys+")";
         }
         // Order
-        Jql += " ORDER BY 'X3 Product Area' ASC, issuetype ASC, 'X3 Legislation' DESC";
+        Jql += " ORDER BY 'X3 Product Area' ASC, issuetype ASC, 'X3 Components' ASC, 'X3 Legislation' DESC";
 
         // fields: Epic name(10801), X3 Release Note(14806), X3 Product Area(15522 -> h3), X3 Legislation(15413 -> h5), Feature(inwardIssue.fields.summary -> h6)
 		//         summary, X3 Solution Details(15118)
-        query = "&fields=issuetype,summary,customfield_10801,customfield_14806,customfield_15522,customfield_15413,customfield_15118,issuelinks,comment";
+        query = "&fields=issuetype,summary,customfield_10801,customfield_14806,customfield_15522,customfield_15413,customfield_15118,customfield_13411,issuelinks,labels,comment";
 		query += "&expand=renderedFields";
     }
     if (filterId) {
@@ -246,6 +267,12 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             	// Component
                 if (component.toLowerCase() == "syracuse") {
             		builder.append(pDocument("Component: Syracuse", format, ""));
+                } else if (component.toLowerCase() == "java") {
+            		builder.append(pDocument("Component: Java Server", format, ""));
+                } else if (component.toLowerCase() == "console") {
+            		builder.append(pDocument("Component: Console", format, ""));
+                } else if (component.toLowerCase() == "print") {
+            		builder.append(pDocument("Component: Print Server", format, ""));
                 }
 				// Release
                 if (release) {
@@ -268,27 +295,36 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         switch (report.toLowerCase()) {
             case "readme":
             	// fixVersions
-                if (false) {
+                if (true) {
                     breakFields.push((Map) jsonSlurper.parseText('{"item":0,"field":"fixVersions","subfield":{"name":"name","breakValue":""},"head":0,"class":""}'));
                 }
             	// issuetype (Bug, Entry Point)
             	breakFields.push((Map) jsonSlurper.parseText('{"item":1,"field":"issuetype","subfield":{"name":"name","breakValue":""},"head":0,"class":""}'));
-            	// For Syracuse, break only
-            	if (component.toLowerCase() != "syracuse") {
-            		// X3 Product Area
+            	// X3 Product Area
+            	if (component.toUpperCase() == "X3") {
 					breakFields.push((Map) jsonSlurper.parseText('{"item":2,"field":"customfield_15522","subfield":{"name":"value","breakValue":""},"head":0,"class":""}'));
                 }
             	break;
             case "releasenote":
             	// X3 Product Area
-            	breakFields.push((Map) jsonSlurper.parseText('{"item":0,"field":"customfield_15522","subfield":{"name":"value","breakValue":""},"head":3,"class":"g1"}'));
+            	// for HR, no need to define the product area as a break, it's alone
+            	int item = 0;
+                if (queryParams.getFirst("product") == "X3") {
+            		breakFields.push((Map) jsonSlurper.parseText('{"item":'+item+',"field":"customfield_15522","subfield":{"name":"value","breakValue":""},"head":3,"class":"g1"}'));
+            		item++;
+                }
             	// issuetype
-				breakFields.push((Map) jsonSlurper.parseText('{"item":1,"field":"issuetype","subfield":{"name":"name","breakValue":""},"head":3,"class":"changes"}'));
+				breakFields.push((Map) jsonSlurper.parseText('{"item":'+item+',"field":"issuetype","subfield":{"name":"name","breakValue":""},"head":3,"class":"changes"}'));
+            	item++;
+            	// X3 Components (optional)
+            	//breakFields.push((Map) jsonSlurper.parseText('{"item":'+item+',"field":"customfield_13411","subfield":{"name":"value","breakValue":""},"head":5,"class":""}'));
+            	//item++;
             	// X3 Legislation
-				breakFields.push((Map) jsonSlurper.parseText('{"item":2,"field":"customfield_15413","subfield":{"name":"value","breakValue":""},"head":5,"class":""}'));
+				breakFields.push((Map) jsonSlurper.parseText('{"item":'+item+',"field":"customfield_15413","subfield":{"name":"value","breakValue":""},"head":5,"class":""}'));
             	// Feature
 				// breakFields.push((Map) jsonSlurper.parseText('{"field":"issuelinks","subfield":{"name":"summary","breakValue":""}}'));
-                if (queryParams.getFirst("new") == "no") {
+
+				if (queryParams.getFirst("new") == "no") {
                     builder.append(getReleasenoteHeader());
                 }
             	break;
@@ -318,9 +354,10 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
                         Map fixVersion = (Map) it;
                         if (fixVersion) {
                             String name = fixVersion.get("name");
-                            if (name.indexOf(release) >= 0) {
-                           		fieldValue = name;
-                                return;
+                            Pattern p = Pattern.compile(release);
+                            Matcher m = p.matcher(name)
+                            while (m.find()) {
+                                fieldValue = name;
                             }
                         }
                     }
@@ -419,6 +456,38 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         switch (format) {
             case "html":
         		typeResponse = "text/html";
+            	// POC - Copy the html file (https://www.journaldev.com/861/java-copy-file) 
+            	// https://www.mkyong.com/java/how-to-convert-inputstream-to-file-in-java/
+				InputStream inputStream = new ByteArrayInputStream(builder.toString().getBytes());
+            	File dest = new File("\\\\10.169.140.21\\pieces_jointes\\HTML\\CFF\\FCT\\RELNOTE_JIRA.htm");
+            /*
+            	OutputStream os = new FileOutputStream(dest);
+            	
+            	byte[] buffer = new byte[1024];
+        		int length;
+        		while ((length = inputStream.read(buffer)) > 0) {
+            		os.write(buffer, 0, length);
+        		} */
+				// or
+            	//def success = copy(inputStream, "\\\\ayvqsuiviprd\\pieces_jointes\\HTML\\CFF\\FCT");
+            	/*
+            	OutputStream outputStream = new FileOutputStream(new File("C:\\temp\\RELNOTE_JIRA.htm"));
+            	int read = 0;
+				byte[] bytes = new byte[1024];
+				while ((read = inputStream.read(bytes)) != -1) {
+					outputStream.write(bytes, 0, read);
+				} */
+            	/*
+				FileChannel sourceChannel = null;
+            	FileChannel destChannel = null;
+				try {
+					sourceChannel = new FileInputStream(dest).getChannel();
+        			destChannel = new FileOutputStream(dest).getChannel();
+        			destChannel.transferFrom(sourceChannel, 0, sourceChannel.size());
+       			} finally {
+           			sourceChannel.close();
+           			sourceChannel.close();
+                } */
             	break;
             case "text":
         		typeResponse = "text/plain";
@@ -438,7 +507,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         responseBuilder = Response.ok(builder.toString()).type(typeResponse);
 
     } else {
-		responseBuilder = Response.status(connection.getHttpCode()).type("text/plain").entity("Oops! Error "+connection.getHttpCode());
+		responseBuilder = Response.status(connection.getHttpCode()).type("text/plain").entity("Oops! Error "+connection.getHttpCode()+". "+connection.getErrorMessage());
         // throw new RuntimeException("HTTP GET Request Failed with Error code: " + connection.getHttpCode());
     }
 	return responseBuilder.build();
@@ -532,7 +601,7 @@ public static String getReadmeBody(String key, Map fields, MultivaluedMap queryP
         }
 
         // Write informations
-		if (queryParams.getFirst("typeDocument") == "internal") { //if (typeDocument.toLowerCase() == "internal") {
+		if (queryParams.getFirst("type") == "internal") { //if (typeDocument.toLowerCase() == "internal") {
             // format for Internal readme
         	builder.append(pDocument("", format, ""));
             // write the 'summary' field
@@ -592,16 +661,16 @@ public static String getReadmeBody(String key, Map fields, MultivaluedMap queryP
 
 public static String createReleaseNoteReport(String releaseName, List issues, List breakFields, MultivaluedMap queryParams) {
 
-	def releases = [new Release(name:'2018 R7', month:"July 2018", href:"MIS_2018R7"),
-        			new Release(name:'2018 R6', month:"July 2018", href:"MIS_2018R6"),
-                    new Release(name:'2018 R5', month:"July 2018", href:"MIS_2018R5"),
-                    new Release(name:'2018 R4', month:"July 2018", href:"MIS_2018R4"),
+	def releases = [new Release(name:'2018 R7', month:"November 2018", href:"MIS_2018R7"),
+        			new Release(name:'2018 R6', month:"October 2018", href:"MIS_2018R6"),
+                    new Release(name:'2018 R5', month:"September 2018", href:"MIS_2018R5"),
+                    new Release(name:'2018 R4', month:"August 2018", href:"MIS_2018R4"),
         			new Release(name:'2018 R3', month:"July 2018", href:"MIS_2018R3"),
                     new Release(name:'2018 R2', month:"May 2018", href:"MIS_2018R2"),
                     new Release(name:'2018 R1', month:"March 2018", href:"MIS_2018R1"),
-                    new Release(name:'2017 R7', month:"December 2017", href:"MIS_2017R7"),
-                    new Release(name:'2017 R6', month:"October 2017", href:"MIS_2017R6"),
-                    new Release(name:'2017 R4', month:"August 2017", href:"MIS_2017R4"),
+                    new Release(name:'2017 R6', month:"December 2017", href:"MIS_2017R7"),
+                    new Release(name:'2017 R4', month:"October 2017", href:"MIS_2017R6"),
+                    new Release(name:'2017 R3', month:"August 2017", href:"MIS_2017R4"),
                     new Release(name:'2017 R2', month:"June 2017", href:"MIS_2017R2"),
                     new Release(name:'2017 R1', month:"May 2017", href:"MIS_2017R1")
                    ];
@@ -614,6 +683,10 @@ public static String createReleaseNoteReport(String releaseName, List issues, Li
 
 	def writer = new StringWriter();
     // MarkupBuilder markupBuilder = new MarkupBuilder(writer);
+	/* - POC on writing directly on file
+	File output = new File("\\\\10.169.140.21\\pieces_jointes\\HTML\\CFF\\FCT\\RELNOTE_JIRA.htm");
+	def builder = new MarkupBuilder(new FileWriter(output));
+    - End of POC */
     def builder = new MarkupBuilder(new IndentPrinter(new PrintWriter(writer), ""));
 	def mkp = builder.getMkp();
 	builder.setOmitEmptyAttributes(true);
@@ -621,11 +694,21 @@ public static String createReleaseNoteReport(String releaseName, List issues, Li
     builder.html {
         head {
             meta ('http-equiv': 'Content-Type', content: 'text/html; charset=utf-8')
-            title ("getReport")
-            link (rel: "styleSheet", type:"text/css", media: "all", href: "ADXHelp_main.css")
+            title ("getReport(draft)")
+            link (rel: "styleSheet", type:"text/css", media: "all", href: "http://212.67.43.50/erp/99/release-note-70/ADXHelp_main.css")
+            /*
+            style (media:"all"){
+        		mkp.yieldUnescaped("http://212.67.43.50/erp/99/release-note-70/ADXHelp_main.css".toURL().text)
+      		}*/
+            writeStyle (builder);
         }
+        // Inline CSS
         body (id: "adx-help") {
-            div (id: "container") {
+            if (queryParams.getFirst("type") == "internal") {
+                button (type: "button", onclick: "alert('Report was copied to ...')", "Copy to ...")
+                // button (type: "button", onclick: "myFunction()", "Copy to ...")
+            }
+			div (id: "container") {
                 div (id: "linkList") {
                     div (id: "linkList2") {
                         div (id: "lmainmenu") {
@@ -719,20 +802,9 @@ public static String createReleaseNoteReport(String releaseName, List issues, Li
 
                         // break fields
 						breakFields.eachWithIndex {breakField, idx ->
-def wbreakValue = ((Map) breakField.getAt("subfield")).getAt("breakValue");
-p ("$idx> $wbreakValue")
                         	if (writeHeaders (builder, breakField, fields, queryParams, release, productAreas)) {
-                                // Reset all descendant level
-								def followingBreaks = breakFields.findAll {(int) breakField.getAt("item") > idx};
-                                if (followingBreaks) {
-                                	breakFields.each {
-    									Map breakSubfield = (Map) it.getAt("subfield");
-                                        if (breakSubfield) {
-                                            p (">"+breakSubfield.getAt("breakValue")+"<")
-        									breakSubfield.putAt("breakValue", "");
-                                        }
-                                    }
-								}
+                                // Reset all descendant level after writing the break value
+                                resetBreakFieldsValue (breakFields, idx);
                             }
 						}
 
@@ -741,11 +813,820 @@ p ("$idx> $wbreakValue")
                         renderedFields = issue.get("renderedFields");
                         writeSummary (builder, writer, key, fields, renderedFields, queryParams);
                     }
+                } // End given release
+
+                div (id: "footer") {
+					mkp.yield ("© ")
+                    a (href: "http://www.sagenorthamerica.com", title: "Site officiel Sage", "Sage")
+					mkp.yield ("1999-2018")
                 }
-            }
+			}
         }
     }
 	return '<!DOCTYPE html>' + writer.toString()
+}
+
+public static void writeStyle(MarkupBuilder builder) {
+    builder.style (type:"text/css", '''
+iframe {
+    min-height: 380px;
+    color: white;
+}
+
+body, html, div {
+
+    margin: 0;
+    padding: 0;
+	color: #3c424f;
+    font-family: "Lato","Helvetica Neue",Arial,sans-serif;
+    font-size: 14px;
+}
+body {
+    background: url("lbg.png") repeat-y fixed 0 0 #FFFFFF;
+}
+INPUT {
+    background-color: #009FDA;
+    border: 1px none;
+    color: #FFFFFF;
+    font-weight: bold;
+}
+p {
+    /*padding-left: 8px;*/
+    padding-right: 8px;
+}
+
+.p2 {
+	padding-right: 8px;
+	padding : 1px 0px 1px 0px;
+	-webkit-margin-before: 4px;
+    -webkit-margin-after: 4px;
+    -webkit-margin-start: 0px;
+    -webkit-margin-end: 0px;
+	line-height:16px;
+}
+div {
+}
+input {
+    font-size: 9pt;
+    margin-top: 5px;
+    padding: 5px;
+}
+.version {
+    background-color: #990069;
+    border-radius: 4px;
+    color: #fff;
+    display: inline-block;
+    font-size: 20pt;
+    font-weight: normal;
+    margin-bottom: 0;
+    padding: 5px 20px;
+	margin-top:70px;
+}
+.features {
+     background-color: #41a940;
+    border-radius: 50px;
+    color: #fff;
+    display: inline-block;
+    font-size: 10pt;
+    font-weight: normal;
+    margin-bottom: 0;
+    padding: 5px 15px;
+    text-transform: uppercase;
+}
+.changes {
+     background-color: #146E96;
+    border-radius: 50px;
+    color: #fff;
+    display: inline-block;
+    font-size: 10pt;
+    font-weight: normal;
+    margin-bottom: 0;
+    padding: 5px 15px;
+    text-transform: uppercase;
+}
+h1 {
+    color: #51534a;
+    font-size: 20pt;
+    font-weight: normal;
+    margin-bottom: 0;
+}
+h2 {
+    background: none repeat scroll 0 0 #4D4F53;
+    color: #FFFFFF;
+    margin-bottom: 0;
+    padding: 5px;
+}
+h3 {
+    border-bottom: 1px solid #DDDDDD;
+    color: #3c424f;
+}
+h4 {
+    background: none repeat scroll 0 0 #4D4F53;
+    color: #FFFFFF;
+    font: bold 10pt "arial";
+    margin-top: 30px;
+    padding: 5px 15px;
+}
+bor {
+    color: #41A940;
+    font-weight: normal;
+    padding-left: 8px;
+}
+h6 {
+    font-weight: bold ;
+	font-size: 9pt;
+    padding-left: 7px;
+}
+h1.g1 {
+
+    margin-bottom: 0;
+}
+h2.g1 {
+    font-size: 14pt;
+    letter-spacing: 1px;
+    margin-bottom: 0;
+}
+h3.g1 {
+   border-bottom: 0 solid #dddddd;
+    color: #C8006E;
+    font-size: 2.3em;
+    font-weight: normal;
+	margin-bottom: 15px;
+    margin-top: 60px;
+}
+h4.g1 {
+    background: none repeat scroll 0 0 #4D4F53;
+    border: 0 none;
+    color: #FFFFFF;
+    font: 1.4em "arial";
+    padding: 10px 38px 10px 15px;
+}
+h4.bloctitle {
+    background: none repeat scroll 0 0 #4D4F53;
+    border: medium none;
+    color: #FFFFFF;
+    font: bold 10pt/30px arial;
+}
+h5.g1 {
+    border-bottom: 1px dashed;
+    color: #41A940;
+    font: 1.4em "arial";
+}
+h6.g1 {
+    font: bold 10pt "arial";
+}
+a {
+    color: #255bc7;
+    cursor: pointer;
+    text-decoration: none;
+}
+  a:hover {
+        color: #1963f6;
+    text-decoration: underline;
+}
+a:visited {
+    color: #1963f6;
+    text-decoration: underline;
+}
+
+ul {
+    margin: 0 0 0 5px;
+}
+ul.std {
+    font: 10pt/2.5ex "arial",sans-serif;
+    letter-spacing: normal;
+    list-style: disc outside url("");
+    margin-bottom: 2px;
+    margin-left: 5px;
+    padding-top: 2px;
+}
+ul.g1 {
+    font: 10pt/2.5ex "arial",sans-serif;
+    letter-spacing: normal;
+    list-style: disc outside url("bullet_brique.gif");
+    margin-bottom: 15px;
+    margin-left: 5px;
+    margin-top: 15px;
+    padding-top: 0;
+}
+ol {
+    margin: 0 0 0 10px;
+}
+li {
+    line-height: 3ex;
+    list-style-type: none;
+    margin-bottom: 2px;
+    /*margin-left: 18px;*/
+    padding-top: 2px;
+	list-style-type: square;
+    list-style-position: inside;
+    text-indent: -1.5em;
+    padding-left: 32px;
+}
+u{
+	font-size: 1.2em;
+    font-weight: bold;
+    line-height: 24px;
+    text-decoration: none;
+}
+u li {
+    list-style-type: none;
+    margin-left: 6px;
+	padding-left: 26px; !important;
+}
+li.liste3:before {
+	content: "? "; /* caractère UTF-8 */
+	padding-right:8px;
+}
+u li:before {
+	content: ""; /* caractère UTF-8 */
+}
+#lmainmenu li::before {
+    content: "";
+}
+.links li::before {
+    content: "";
+}
+.liste3{
+	padding-left: 58px;
+	list-style-type: none;
+	line-height: 2.5ex; !important; 
+	text-indent: -2em !important;
+}
+.liste4{
+	padding-left: 86px;
+	list-style-type: disc;
+	line-height: 2ex; !important; 
+	text-indent: -2em !important;
+}
+video{
+max-width: 70%;
+	
+}
+#container {
+    background: url("topbg.png") repeat-x scroll 0 0 rgba(0, 0, 0, 0);
+    border-right: 1px solid #223300;
+    border-top: 1px solid #4D4F53;
+    margin: 0;
+    padding: 0;
+}
+#topNavBar {
+	display:block;
+    margin: 7px 0 0;
+    padding: 0;
+    position: relative;
+	display: none;
+}
+#topNavBar img {
+    border: 0 none;
+	padding-left: 20px;
+}
+#topNavBar p {
+    padding: 0;
+}
+#topTabOpen {
+    position: absolute;
+    top: -50px;
+}
+#tabOpen {
+    background: none repeat scroll 0 0 rgba(250, 250, 250, 0.2);
+    display: table-cell;
+    padding: 0 10px;
+    text-align: center;
+}
+#tabClose {
+    background: none repeat scroll 0 0 rgba(250, 250, 250, 0.2);
+    display: table-cell;
+    padding: 10px;
+    text-align: center;
+    width: 60px;
+}
+#topNBHome {
+    background: url("s-site-sage.png") no-repeat scroll 0 0 rgba(0, 0, 0, 0);
+	display:block;
+    height: 24px;
+    left: 0;
+    position: absolute;
+    width: 155px;
+	display: none;
+}
+#topNBLinks {
+    border-right: 0 solid #ABBC47;
+    border-top: 0 solid #ABBC47;
+    padding-right: 2em;
+	display: none;
+} 
+#topNBLinks p {
+    color: #FFFFFF;
+    font-weight: bold;
+    text-align: right;
+}
+#topNBLinks a:link {
+   border: 1px solid;
+    border-radius: 2px;
+    color: #ed1c5f;
+    padding: 4px 12px;
+    text-decoration: none;
+}
+#topNBLinks a:visited {
+    color: #E0E1DD;
+    text-decoration: none;
+}
+#topNBLinks a:hover {
+    background: #ed1c5f;
+	color:#FFFFFF;
+}
+#topNBPath {
+    color: #FFFFFF;
+    font: 10pt "arial";
+    position: absolute;
+ top: 100px;
+    width: 100%;
+	display: none;
+}
+#topNBPath p {
+
+    color: #767a83;
+    font: 10pt/20px "arial";
+   margin-left: 220px;
+    padding-left: 33px;
+    position: relative;
+}
+#topNBPath a:link {
+    color: #FFFFFF;
+    text-decoration: none;
+}
+#topNBPath a:visited {
+    color: #FFDDDD;
+    text-decoration: none;
+}
+#topNBPath a:hover {
+    color: #FFFFFF;
+    text-decoration: underline;
+}
+#pageHeader {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+}
+#pageHeader h1 {
+    font-size: 4em;
+    margin: 0 0 0 220px;
+    padding: 30px 0 0px 30px;
+	line-height:46px;
+}
+.h1_subtitle {
+	padding-top : 0px !important;
+}
+#pageHeader h1 span{
+	font-weight: bold;
+}	
+#pageHeader h2 {
+    display: none;
+}
+#intro {
+    margin: 0;
+    padding: 0;
+}
+#presentation {
+    background-color: rgba(0, 0, 0, 0.05);
+    margin: 15px 15px 15px 180px;
+    padding: 2px 5px 15px;
+}
+
+#presentation p {
+    text-align: justify;
+}
+
+div.stdBloc {
+    border-bottom: 1px solid #ddd;
+    padding: 0 0 50px;
+}
+div.stdBloc:last-child {
+    border-bottom: medium none;
+}
+
+#supportingText {
+    margin: 10px 0 0 220px;
+    padding: 0 30px;
+    text-align: justify;
+	overflow: auto;
+	overflow-y: hidden;
+	-ms-overflow-y: hidden;
+}
+#footer {
+       background: #262a33 none repeat scroll 0 0;
+    bottom: 0;
+    clear: both;
+   color: #b1b3b9;
+    left: 0;
+    padding: 5px;
+    position: fixed;
+    text-align: center;
+    width: 100%;
+
+}
+#footer a:link, #footer a:visited {
+   color: #b1b3b9;
+
+}
+div.stdBloc > .links {
+    color: #00A1DE;
+    font: 9pt "arial",sans-serif;
+    left: 7px;
+    margin: 180px 0 0;
+    position: absolute;
+    width: 145px;
+	padding-left: 20px;
+}
+div.links h3 {
+    border-top: 1pt solid rgba(0, 0, 0, 0);
+    color: #00A1DE;
+    font: bold 12pt "arial";
+    letter-spacing: 1px;
+    margin-bottom: 2px;
+}
+div.links ul {
+    color: #00A1DE;
+    margin: 0;
+    padding: 0 6px;
+}
+div.links li {
+   
+    display: block;
+    
+    list-style-type: none;
+    margin: 0;
+    padding: 5px 0 6px 10px;
+}
+div.links li a {
+    color: #FFFFFF;
+    display: block;
+    font-weight: normal;
+    text-align: left;
+}
+#linkList {
+ /*  color: #00A1DE;
+    position: absolute;
+    top: 200px;
+    width: 200px;*/
+    background-color: #16242C;
+    left: 0;
+    margin-right: 20px;
+    min-height: 100vh;
+    min-width: 200px;
+    position: fixed;
+}
+#linkList2 {
+	padding-left:20px;
+}
+
+#linkList2 h3.select span {
+    display: none;
+}
+#lmainmenu {
+	background-color: #16242C;
+    padding-top: 30px;
+}
+#lmainmenu ul {
+    padding: 0 10px 5px 20px;
+}
+#lmainmenu li {
+    display: block;
+    list-style-type: none;
+    padding: 5px 20px 5px 0;
+}
+#lmainmenu li a {
+    display: block;
+    
+    text-align: left;
+}
+#lmainmenu li a.c {
+    color: #00A1DE;
+    display: inline;
+    font-weight: normal;
+    text-decoration: none;
+}
+#lmainmenu li a {
+    color: #fff;
+    display: block;
+    font-weight: lighter;
+    letter-spacing: 0.05em;
+    text-align: left;
+}
+#lmainmenu li a.c:hover {
+    
+    text-decoration: underline;
+}
+TABLE.std1 {
+    border-top-width: 0;
+    font-size: 10pt;
+    margin-left: 0;
+    padding: 1px 3px 4px;
+    text-align: center;
+    width: 100%;
+}
+TABLE.std1 TD {
+    background-color: #FFFFFF;
+    border: 1px solid #C8C8C8;
+    font-size: 10pt;
+    padding: 3px;
+    text-align: left;
+}
+TH.std1ColOdd p {
+    color: #FFFFFF;
+    font-size: 9pt;
+    font-weight: bold;
+    margin: 0.4em;
+    padding: 0;
+    text-align: center;
+    vertical-align: sub;
+}
+TH.std1ColEven p {
+    background-color: #779244;
+    color: #FFFFFF;
+    font-size: 10pt;
+    font-weight: bold;
+    padding-left: 0.3em;
+    padding-right: 0.3em;
+    text-align: center;
+    vertical-align: sub;
+}
+TD.std1OddRowEvenCol p {
+    background-color: #F4F8FB;
+    border-right: 0 solid #B2CDE5;
+    font-size: 10pt;
+}
+TD.std1EvenRowEvenCol p {
+    background-color: #ECECEC;
+    font-size: 10pt;
+}
+TD.std1OddRowOddCol p {
+    background-color: #F4F8FB;
+    font-size: 10pt;
+}
+TD.std1EvenRowOddCol p {
+    background-color: #ECECEC;
+    font-size: 10pt;
+}
+TABLE.fld1 {
+    font-size: 10pt;
+    text-align: left;
+    width: 100%;
+}
+TABLE.fld1 td {
+    padding: 1px 1px 1px 3px;
+}
+TABLE.fld1 ul {
+    margin: 0 0 0 5px;
+    padding: 0;
+}
+TABLE.fld1 ul.std {
+    font: 10pt/2.5ex "arial",sans-serif;
+    letter-spacing: normal;
+    list-style: disc outside url("");
+    margin-bottom: 0;
+    margin-left: 5px;
+    padding-top: 0;
+}
+TABLE.fld1 ul.g1 {
+    font: 10pt/2.5ex "arial",sans-serif;
+    letter-spacing: normal;
+    list-style: disc outside url("bullet_brique.gif");
+    margin-bottom: 15px;
+    margin-left: 5px;
+    margin-top: 15px;
+    padding-top: 0;
+}
+TABLE.fld1 li {
+    font: 10pt/2.5ex "arial",sans-serif;
+    letter-spacing: normal;
+    list-style: disc outside none;
+    margin-bottom: 0;
+    margin-left: 30px;
+    padding-top: 0;
+}
+TABLE.fld1 li.fld {
+    font: bold 10pt/2.5ex "arial",sans-serif;
+    letter-spacing: normal;
+    list-style: disc outside url("bullet_brique.gif");
+    margin-bottom: 0;
+    margin-left: 15px;
+    margin-top: 10px;
+    padding-top: 0;
+}
+div.ddesc {
+    background-color: rgba(0, 0, 0, 0.02);
+    border: 1px solid #AAAAAA;
+    border-radius: 3px;
+    display: none;
+    margin: 60px 0;
+}
+div.ddesc p {
+    padding: 1px 6px 5px 15px;
+}
+div.bdesc {
+    background: url("puce-titres.gif") no-repeat scroll 0 0 rgba(0, 0, 0, 0);
+    color: #FF5800;
+    font: 11pt "arial";
+    left: 201px;
+    margin: 10px 0 0 -16px;
+    padding: 0 0 10px 18px;
+    position: absolute;
+}
+div.bdesc:hover {
+    cursor: pointer;
+    text-decoration: underline;
+}
+div.bdesc p {
+    margin: 0;
+    padding: 0;
+}
+div.dfields {
+    background-color: rgba(0, 0, 0, 0.02);
+    border: 1px solid #AAAAAA;
+    border-radius: 3px;
+    display: none;
+    margin: 60px 0 0;
+    padding: 0;
+}
+div.dfields p {
+    padding: 1px 1px 1px 20px;
+}
+div.bfields {
+    background: url("puce-titres.gif") no-repeat scroll 0 1px rgba(0, 0, 0, 0);
+    color: #FF5800;
+    font: 11pt "arial";
+    left: 201px;
+    margin: 10px 0 0 -16px;
+    padding: 0 0 10px 18px;
+    position: absolute;
+    vertical-align: top;
+}
+div.bfields:hover {
+    cursor: pointer;
+    text-decoration: underline;
+}
+div.bfields p {
+    margin: 0;
+    padding: 0;
+}
+#cache {
+    display: none;
+}
+#hdico {
+    background-color: #64902B;
+    border-color: #99B467 #99B467 #013D23 #013D23;
+    border-style: solid;
+    border-width: 1px;
+    color: #CDE0A8;
+    font-family: arial;
+    font-size: 10pt;
+    font-weight: bold;
+    padding-left: 0.3em;
+    padding-right: 0.3em;
+    text-align: center;
+    vertical-align: sub;
+}
+#hdicos {
+    background-color: #013D23;
+    border-color: #99B467 #99B467 #013D23 #013D23;
+    border-style: solid;
+    border-width: 1px;
+    color: #B7C000;
+    font-family: arial;
+    font-size: 10pt;
+    font-weight: bold;
+    text-align: center;
+}
+#ldico {
+    border-bottom: 1px solid #BBBBBB;
+    border-left: 1px solid #BBBBBB;
+    color: #675C53;
+    font-family: arial;
+    font-size: 10pt;
+    text-align: center;
+}
+#ldicodis {
+    background: url("disabledtb.gif") repeat scroll 0 0 rgba(0, 0, 0, 0);
+    border-bottom: 1px solid #BBBBBB;
+    border-left: 1px solid #BBBBBB;
+    color: #675C53;
+    font-family: arial;
+    font-size: 10pt;
+}
+#ldico2 {
+    border-bottom: 1px solid #BBBBBB;
+    border-left: 1px solid #BBBBBB;
+    color: #000000;
+    font-family: Arial;
+    font-size: 7pt;
+    font-weight: normal;
+    text-align: center;
+}
+#ldicos {
+    background-color: #F4FCE6;
+    border-bottom: 1px solid #BBBBBB;
+    border-left: 1px solid #BBBBBB;
+    border-right: 1px solid #BBBBBB;
+    color: #675C53;
+    font-family: arial;
+    font-size: 10pt;
+    font-weight: normal;
+    text-align: center;
+}
+#lzone {
+    border-bottom: 1px solid #BBBBBB;
+    border-left: 1px solid #BBBBBB;
+    color: #000000;
+    font-family: Arial;
+    font-size: 10pt;
+    font-weight: normal;
+    padding-left: 8px;
+    text-align: left;
+}
+#lzones {
+    border-bottom: 1px solid #BBBBBB;
+    border-left: 1px solid #BBBBBB;
+    border-right: 1px solid #BBBBBB;
+    color: #000000;
+    font-family: Arial;
+    font-size: 10pt;
+    font-weight: normal;
+    padding-left: 8px;
+    text-align: left;
+}
+span.instruction1 {
+    color: #008000;
+    font-family: "Courier New";
+    font-weight: bold;
+}
+span.commentaire1 {
+    color: #696969;
+    font-family: "Courier New";
+}
+span.syntaxe1 {
+    color: #008000;
+    font-family: "Courier New";
+}
+span.motcle1 {
+    color: #008000;
+    font-family: "Courier New";
+}
+span.parametreinstruction1 {
+    color: #000000;
+    font-family: "Courier New";
+    font-style: italic;
+}
+span.element1 {
+    color: #000000;
+    font-family: "Courier New";
+    font-style: italic;
+}
+h4.bloctitle p {
+    line-height: 20px;
+    margin: 0;
+    padding: 0;
+}
+h5 {
+    font-size: 20pt;
+    font-weight: normal;
+    margin: 40px 0 0;
+    padding: 0 0 10px 1px;
+}
+
+.stdBloc > h5 {
+    font-size: 11pt;
+    margin: 40px 0 0;
+    padding: 0 !important;
+}
+.fld1 h5 {
+    font-size: 10pt;
+    padding-left: 20px;
+    text-decoration: underline;
+}
+.std1ColOdd {
+    background: none repeat scroll 0 0 #9A9B9C;
+    padding: 10px;
+    text-transform: uppercase;
+}
+#container > #pageHeader h5 {
+    width: 100%;
+}
+#pageHeader h5 {
+    color: #41A940;
+    font: 18pt "arial";
+    margin: 30px 0 30px 155px;
+    padding: 60px 30px 0;
+}
+div#container table {
+    font-size: 1em;
+}
+.highlight {
+    background-color: #FFEF67;
+    color: #434343;}
+}	
+''')
 }
 
 public static boolean writeHeaders(MarkupBuilder builder, Map breakField, Map fields, MultivaluedMap queryParams, Release release, List<ProductArea> productAreas) {
@@ -799,7 +1680,10 @@ public static boolean writeHeaders(MarkupBuilder builder, Map breakField, Map fi
             builder.h4 (class: headerClass, id: anchor, fieldValue)
             break;
             case 5:
-            builder.h5 (class: headerClass, id: anchor, fieldValue)
+            // builder.h5 (class: headerClass, id: anchor, fieldValue)
+            builder.u {
+            	h5 (class: headerClass, id: anchor, fieldValue)
+            }
             break;
         }
         return true;
@@ -807,6 +1691,23 @@ public static boolean writeHeaders(MarkupBuilder builder, Map breakField, Map fi
         return false;
     }
 }
+
+/*
+Reset break fields values
+*/
+public static void resetBreakFieldsValue(List breakFields, int idx) {
+    def followingBreaks = breakFields.findAll {((int) it.getAt("item")) > idx};
+        if (followingBreaks) {
+            followingBreaks.each {
+                Map breakSubfield = (Map) it.getAt("subfield");
+                if (breakSubfield) {
+                    // p ("!Reset $idx " + it.getAt("field") +"/"+ breakSubfield.getAt("breakValue"))
+                    breakSubfield.putAt("breakValue", "#");
+                }
+            }
+        } // end Reset
+}
+
 
 /*
 Get the value property of a field
@@ -875,7 +1776,7 @@ public static void writeSummary(MarkupBuilder builder, StringWriter writer, Stri
             if (queryParams.getFirst("type") == "internal") {
                 u {
                     h5 {
-                        a (href:"$url/browse/$key", "$summary [$key]")
+                        a (href:"$url/browse/$key", target: "_blank", "$summary [$key]")
                     }
                 }
             } else {
@@ -1462,4 +2363,23 @@ public class ProductArea {
 class Person {
     String name
     int age
+}
+
+/** 
+* Copy a file from source to destination. 
+* 
+* @param source the source 
+* @param destination the destination 
+* @return True if succeeded , False if not 
+*/ 
+public static boolean copy(InputStream source, String destination) {
+    boolean succeess = true;
+
+	try { 
+    	Files.copy(source, Paths.get(destination), StandardCopyOption.REPLACE_EXISTING);
+	} catch (IOException ex) {
+    	succeess = false;
+	} 
+
+return succeess;
 }
