@@ -77,10 +77,13 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
     String release = queryParams.getFirst("release");
     // format: text(default), html
     String format = queryParams.getFirst("format");
-    if (!format) {format = "text"};
+    if (!format) {format = (report.toLowerCase() == "readme") ? "text": "html"};
     // product: x3(default), x3p(people)
     if (!queryParams.getFirst("product")) {queryParams.putSingle("product", "X3")};
     String product = queryParams.getFirst("product");
+    // area: none(default)
+    if (!queryParams.getFirst("area")) {queryParams.putSingle("area", "all")};
+    String productArea = queryParams.getFirst("area");
     // keys: JIRA keys for testing 'X3-111,X3-222,...'
     String keys = queryParams.getFirst("keys");
     // filterid: filter id or if null, keep the jql programmed
@@ -102,7 +105,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
 	// For staging instance
     if (!queryParams.getFirst("staging")) {queryParams.putSingle("staging", "no")};
     // New html format
-    if (!queryParams.getFirst("new")) {queryParams.putSingle("new", "no")};
+    if (!queryParams.getFirst("new")) {queryParams.putSingle("new", "yes")};
     // Checks mandatory parameters
     try {
         assert (report.toLowerCase() == "readme" || report.toLowerCase() == "releasenote") : "'model' parameter should be Readme ou Releasenote";
@@ -114,6 +117,7 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         assert (format.toLowerCase() == "text" || format.toLowerCase() == "html") : "'format' parameter should be text ou html";
         // Cpmponents
         assert (component.toUpperCase() == "X3" || component.toLowerCase() == "syracuse" || component.toLowerCase() == "java" || component.toLowerCase() == "console" || component.toLowerCase() == "print") : "if given, 'component' parameter should be set to Syracuse, Java, console or Print";
+        // Product Area
     } catch (AssertionError e) {
         responseBuilder = Response.status(Status.NOT_FOUND).type("text/plain").entity("Something is wrong: " + e.getMessage());
         return responseBuilder.build();
@@ -178,6 +182,9 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         // Releases
         if (release) {
         	Jql += " AND fixVersion in versionMatch('^"+release+"')";
+            if (true) {
+            	Jql += " AND fixVersionsNumber = 1";	// Only issue who have One and only one fixversion value
+            }
         }
         // Product
         if (((String) queryParams.getFirst("product")).toUpperCase() == "X3") {
@@ -185,16 +192,25 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
         } else {
             Jql += " AND 'X3 Product Area' in (People)";
         }
+        // Area
+        if (((String) queryParams.getFirst("area")).toLowerCase() != "all") {
+            Jql += " AND 'X3 Product Area' in ('$productArea')";
+        }
         // JIRA keys (optionnal)
         if (keys) {
             Jql += " AND issuekey in ("+keys+")";
         }
         // Order
-        Jql += " ORDER BY 'X3 Product Area' ASC, issuetype ASC, 'X3 Components' ASC, 'X3 Legislation' DESC";
+        // TODO: When Epic will be synchronysed with Aha!, we can oder in first with fixVersions
+        Jql += " ORDER BY";
+        if (true) {
+        	Jql += " fixVersion,";
+        }
+        Jql += " 'X3 Product Area' ASC, issuetype ASC, 'X3 Components' ASC, 'X3 Legislation' DESC";
 
         // fields: Epic name(10801), X3 Release Note(14806), X3 Product Area(15522 -> h3), X3 Legislation(15413 -> h5), Feature(inwardIssue.fields.summary -> h6)
 		//         summary, X3 Solution Details(15118)
-        query = "&fields=issuetype,summary,customfield_10801,customfield_14806,customfield_15522,customfield_15413,customfield_15118,customfield_13411,issuelinks,labels,comment";
+        query = "&fields=issuetype,summary,customfield_10801,customfield_14806,customfield_15522,customfield_15413,customfield_15118,customfield_13411,fixVersions,issuelinks,labels,comment";
 		query += "&expand=renderedFields";
     }
     if (filterId) {
@@ -306,9 +322,14 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
                 }
             	break;
             case "releasenote":
+            	int item = 0;
+            	// fixVersions
+                if (true) {
+                    breakFields.push((Map) jsonSlurper.parseText('{"item":'+item+',"field":"fixVersions","subfield":{"name":"name","breakValue":""},"head":3,"class":"version"}'));
+            		item++;
+                }
             	// X3 Product Area
             	// for HR, no need to define the product area as a break, it's alone
-            	int item = 0;
                 if (queryParams.getFirst("product") == "X3") {
             		breakFields.push((Map) jsonSlurper.parseText('{"item":'+item+',"field":"customfield_15522","subfield":{"name":"value","breakValue":""},"head":3,"class":"g1"}'));
             		item++;
@@ -324,14 +345,14 @@ return Response.ok(sb.toString(), MediaType.TEXT_HTML_TYPE).build();
             	// Feature
 				// breakFields.push((Map) jsonSlurper.parseText('{"field":"issuelinks","subfield":{"name":"summary","breakValue":""}}'));
 
-				if (queryParams.getFirst("new") == "no") {
+				if (queryParams.getFirst("new") != "yes") {
                     builder.append(getReleasenoteHeader());
                 }
             	break;
         }
 
         List issues = (List) jsonResult.get("issues");
-        if (queryParams.getFirst("new") != "no") {
+        if (queryParams.getFirst("new") == "yes") {
             // POC: call directly a function
             builder.append(createReleaseNoteReport(release, issues, breakFields, queryParams));
         } else {
@@ -661,25 +682,16 @@ public static String getReadmeBody(String key, Map fields, MultivaluedMap queryP
 
 public static String createReleaseNoteReport(String releaseName, List issues, List breakFields, MultivaluedMap queryParams) {
 
-	def releases = [new Release(name:'2018 R7', month:"November 2018", href:"MIS_2018R7"),
-        			new Release(name:'2018 R6', month:"October 2018", href:"MIS_2018R6"),
-                    new Release(name:'2018 R5', month:"September 2018", href:"MIS_2018R5"),
-                    new Release(name:'2018 R4', month:"August 2018", href:"MIS_2018R4"),
-        			new Release(name:'2018 R3', month:"July 2018", href:"MIS_2018R3"),
-                    new Release(name:'2018 R2', month:"May 2018", href:"MIS_2018R2"),
-                    new Release(name:'2018 R1', month:"March 2018", href:"MIS_2018R1"),
-                    new Release(name:'2017 R6', month:"December 2017", href:"MIS_2017R7"),
-                    new Release(name:'2017 R4', month:"October 2017", href:"MIS_2017R6"),
-                    new Release(name:'2017 R3', month:"August 2017", href:"MIS_2017R4"),
-                    new Release(name:'2017 R2', month:"June 2017", href:"MIS_2017R2"),
-                    new Release(name:'2017 R1', month:"May 2017", href:"MIS_2017R1")
-                   ];
-	def release = releases.find {it.getName() == releaseName};
+	def internalReport = (queryParams.getFirst("type") == "internal") ? true : false;
 
-	def productAreas = [new ProductArea(name:'Finance', href:"MIS_FINAN"),
-                       	new ProductArea(name:'Distribution', href:"MIS_DISTR"),
-                       	new ProductArea(name:'Manufacturing', href:"MIS_MANUF"),
-                       	new ProductArea(name:'Projects', href:"MIS_PROJ")];
+	List<Release> releases = [];
+	def release;
+    if (getReleases(releases, releaseName, internalReport) > 0) {
+		release = releases.find {it.getName() >= releaseName};
+	} else {
+    	return "Error: $releaseName is not part of Cloud releases!";
+    }
+    List<ProductArea> productAreas;
 
 	def writer = new StringWriter();
     // MarkupBuilder markupBuilder = new MarkupBuilder(writer);
@@ -694,20 +706,25 @@ public static String createReleaseNoteReport(String releaseName, List issues, Li
     builder.html {
         head {
             meta ('http-equiv': 'Content-Type', content: 'text/html; charset=utf-8')
-            title ("getReport(draft)")
             link (rel: "styleSheet", type:"text/css", media: "all", href: "http://212.67.43.50/erp/99/release-note-70/ADXHelp_main.css")
             /*
             style (media:"all"){
         		mkp.yieldUnescaped("http://212.67.43.50/erp/99/release-note-70/ADXHelp_main.css".toURL().text)
       		}*/
-            writeStyle (builder);
+            if (internalReport) {
+            	title ("getReport(draft)")
+            	writeStyle (builder);
+            } else {
+            	title ("Release_Note")
+            }
         }
         // Inline CSS
         body (id: "adx-help") {
+            /*
             if (queryParams.getFirst("type") == "internal") {
                 button (type: "button", onclick: "alert('Report was copied to ...')", "Copy to ...")
                 // button (type: "button", onclick: "myFunction()", "Copy to ...")
-            }
+            } */
 			div (id: "container") {
                 div (id: "linkList") {
                     div (id: "linkList2") {
@@ -717,7 +734,7 @@ public static String createReleaseNoteReport(String releaseName, List issues, Li
                                 li {
                                     releases.each {
                                         def curRelease;
-                                        if (queryParams.getFirst("type") == "internal") {
+                                        if (internalReport) {
                                             curRelease = it.getName();
                                         } else {
                                             curRelease = it.getMonth();
@@ -755,35 +772,28 @@ public static String createReleaseNoteReport(String releaseName, List issues, Li
                     mkp.yield (" can do for you.")
                 }
 
-				// Begin given release
+				// <!-- Begin given release -->
+				// TODO: loop on List Releases
                 mkp.comment ("Begin ${release.getName()} release")
                 div (class: "stdBloc") {
                     div (class: "links") {
                         h3 (class: "g1") {
                             span {}
                         }
-                        // List of Product Area
+                        // List of 'X3 Product Area' use by the current release
                         ul {
+                            productAreas = getAllProducArea(issues, null);
                             def href, name;
                             productAreas.each {
-                                href = it.getHref();
                                 name = it.getName();
-                                li {a (href: "#"+href, name)}
+                                href = it.getHref();
+                                li {a (href: "#$href", name)}
                             }
                         }
                     }
                     // Release
-                    def curRelease;
-                    if (queryParams.getFirst("type") == "internal") {
-                        curRelease = release.getName();
-                    } else {
-                        curRelease = release.getMonth().toUpperCase();
-                    }
-                    h3 (class: "version", id: release.getName(), curRelease)
-                    /*
-                    h3 (class: "version", id: release.getName()) {
-                        mkp.yield (release.getMonth().toUpperCase())
-                    }*/
+                    def curRelease = (internalReport) ? release.getName() : release.getMonth().toUpperCase();
+                    h3 (class: "version", name: release.getName(), id: release.getHref(), curRelease)
                     // add Readme link (if necessary)
                     p {
                         mkp.yield ("Refer to the ")
@@ -802,7 +812,7 @@ public static String createReleaseNoteReport(String releaseName, List issues, Li
 
                         // break fields
 						breakFields.eachWithIndex {breakField, idx ->
-                        	if (writeHeaders (builder, breakField, fields, queryParams, release, productAreas)) {
+                        	if (writeHeaders (builder, breakField, fields, queryParams, release, releases, productAreas)) {
                                 // Reset all descendant level after writing the break value
                                 resetBreakFieldsValue (breakFields, idx);
                             }
@@ -825,6 +835,853 @@ public static String createReleaseNoteReport(String releaseName, List issues, Li
     }
 	return '<!DOCTYPE html>' + writer.toString()
 }
+
+public static int getReleases(List<Release> releases, String releaseName, boolean internalReport) {
+    if (!internalReport || (internalReport && (releaseName == "2017 R1" || "2017 R1".indexOf(releaseName) >= 0))) {
+    	releases.push(new Release(name:'2017 R1', month:"May 2017", href:"MIS_2017R1"));
+    }
+    if (!internalReport || (internalReport && (releaseName == "2017 R2" || "2017 R2".indexOf(releaseName) >= 0))) {
+    	releases.push(new Release(name:'2017 R2', month:"June 2017", href:"MIS_2017R2"));
+    }
+    if (!internalReport || (internalReport && (releaseName == "2017 R4" || "2017 R4".indexOf(releaseName) >= 0))) {
+    	releases.push(new Release(name:'2017 R4', month:"August 2017", href:"MIS_2017R4"));
+    }
+    if (!internalReport || (internalReport && (releaseName == "2017 R6" || "2017 R6".indexOf(releaseName) >= 0))) {
+    	releases.push(new Release(name:'2017 R6', month:"October 2017", href:"MIS_2017R6"));
+    }
+    if (!internalReport || (internalReport && (releaseName == "2017 R7" || "2017 R7".indexOf(releaseName) >= 0))) {
+    	releases.push(new Release(name:'2017 R7', month:"December 2017", href:"MIS_2017R7"));
+    }
+    if (!internalReport || (internalReport && (releaseName == "2018 R1" || "2018 R1".indexOf(releaseName) >= 0))) {
+    	releases.push(new Release(name:'2018 R1', month:"March 2018", href:"MIS_2018R1"));
+    }
+    if (!internalReport || (internalReport && (releaseName == "2018 R2" || "2018 R2".indexOf(releaseName) >= 0))) {
+    	releases.push(new Release(name:'2018 R2', month:"May 2018", href:"MIS_2018R2"));
+    }
+    if (!internalReport || (internalReport && (releaseName == "2018 R3" || "2018 R3".indexOf(releaseName) >= 0))) {
+    	releases.push(new Release(name:'2018 R3', month:"July 2018", href:"MIS_2018R3"));
+    }
+    if (!internalReport || (internalReport && (releaseName == "2018 R4" || "2018 R4".indexOf(releaseName) >= 0))) {
+    	releases.push(new Release(name:'2018 R4', month:"August 2018", href:"MIS_2018R4"));
+    }
+    if (!internalReport || (internalReport && (releaseName == "2018 R5" || "2018 R5".indexOf(releaseName) >= 0))) {
+    	releases.push(new Release(name:'2018 R5', month:"September 2018", href:"MIS_2018R5"));
+    }
+    if (!internalReport || (internalReport && (releaseName == "2018 R6" || "2018 R6".indexOf(releaseName) >= 0))) {
+    	releases.push(new Release(name:'2018 R6', month:"October 2018", href:"MIS_2018R6"));
+    }
+    if (!internalReport || (internalReport && (releaseName == "2018 R7" || "2018 R7".indexOf(releaseName) >= 0))) {
+        releases.push(new Release(name:'2018 R7', month:"November 2018", href:"MIS_2018R7"));
+    }
+    return releases.size();
+}
+
+/**
+Get all 'X3 Product Area' for the given release
+**/
+public static List<ProductArea> getAllProducArea(List issues, String release) {
+
+	List<ProductArea> productAreas = [new ProductArea(name:'Finance', href:"MIS_FINAN", present:false),
+                       	new ProductArea(name:'Distribution', href:"MIS_DISTR", present:false),
+                       	new ProductArea(name:'Manufacturing', href:"MIS_MANUF", present:false),
+                       	new ProductArea(name:'Projects', href:"MIS_PROJ", present:false)];
+
+	List<ProductArea> productAreasFound = [];
+
+	Map issue, fields;
+    issues.each {
+        issue = (Map) it;
+        fields = issue.get("fields");
+        
+    	// String fixVersion = getFieldValue("fixVersions", "name", fields, release)
+        String productArea = getFieldValue("customfield_15522", "value", fields, null)
+        // TOFINISH...
+        if (productAreasFound.findIndexOf {((ProductArea)it).getName() == productArea} == -1) {
+        	productAreasFound.push(new ProductArea(name:productArea, href:"MIS_"+productArea.toUpperCase(), present:true));
+        }
+    }
+	return productAreasFound;
+}
+
+public static boolean writeHeaders(MarkupBuilder builder, Map breakField, Map fields, MultivaluedMap queryParams, Release release, List<Release> releases, List<ProductArea> productAreas) {
+    String breakFieldName = breakField.getAt("field");
+    Map breakSubfield = (Map) breakField.getAt("subfield");
+
+	// Get the last breakfield value
+    String breakValue = breakSubfield.getAt("breakValue");
+    // Get the field value
+    String fieldValue = getFieldValue(breakFieldName, (String) breakSubfield.getAt("name"), fields, release.getName());
+	// builder.p (fieldValue +" b:"+ breakValue) // for debug
+
+	if (fieldValue && fieldValue != breakValue) {
+        // Update the last break value
+        breakSubfield.putAt("breakValue", fieldValue);
+
+		if (fieldValue && fieldValue != "") {
+            // Search the href of current 'X3 Product Area'
+            String anchor;
+            switch (breakFieldName) {
+                case "fixVersions":
+                	anchor = release.getHref();
+                	def name = release.getName()
+                	break;
+                case "customfield_15522":
+                    // Get the anchor
+                    ProductArea productArea = productAreas.find {it.getName() == fieldValue};
+                    if (productArea) {
+                        anchor = productArea.getHref();
+                    }
+                    break;
+                case "customfield_15413":
+                    break;
+                case "issuetype":
+                    // Change Bug to CHANGES and Epic to FEATURES
+                    if (fieldValue == "Bug") {
+                        fieldValue = "CHANGES";
+                    } else if (fieldValue == "Epic") {
+                        fieldValue = "FEATURES";
+                    }
+                    break;
+                default :
+                    anchor = "None";
+            }
+            // Write the value of the break field
+            String headerClass = breakField.getAt("class");
+            Integer level = ((String) breakField.getAt("head")).toInteger();
+            switch (level) {
+                case 1:
+                builder.h1 (class: headerClass, id: anchor, fieldValue)
+                break;
+                case 2:
+                builder.h2 (class: headerClass, id: anchor, fieldValue)
+                break;
+                case 3:
+                builder.h3 (class: headerClass, id: anchor, fieldValue)
+                break;
+                case 4:
+                builder.h4 (class: headerClass, id: anchor, fieldValue)
+                break;
+                case 5:
+                // builder.h5 (class: headerClass, id: anchor, fieldValue)
+                builder.u {
+                    h5 (class: headerClass, id: anchor, fieldValue)
+                }
+                break;
+            }
+		}
+        return true;
+	} else {
+        return false;
+    }
+}
+
+/*
+Reset break fields values
+*/
+public static void resetBreakFieldsValue(List breakFields, int idx) {
+    def followingBreaks = breakFields.findAll {((int) it.getAt("item")) > idx};
+        if (followingBreaks) {
+            followingBreaks.each {
+                Map breakSubfield = (Map) it.getAt("subfield");
+                if (breakSubfield) {
+                    // p ("!Reset $idx " + it.getAt("field") +"/"+ breakSubfield.getAt("breakValue"))
+                    breakSubfield.putAt("breakValue", "#");
+                }
+            }
+        } // end Reset
+}
+
+
+/*
+Get the value property of a field
+*/
+private static String getFieldValue(String fieldName, String subfieldName, Map fields, String release) {
+    String fieldValue = null;
+
+	switch (fieldName) {
+        case "fixVersions":
+            List fixVersions = (List) fields.getAt("fixVersions");
+            fixVersions.each {
+                Map field = (Map) it;
+                if (field.size() > 0) {
+                    fieldValue = field.get(subfieldName);
+                    return;
+                    String name = field.get("name");
+                    //fieldValue = name;
+                    // ex: fixVersions=2018 R1, release=2018
+                    if (name.indexOf(release) >= 0) {
+                        fieldValue = name;
+                        return;
+                    }
+                }
+            }
+        	break;
+        default :
+            Map field = fields.get(fieldName);
+            if (field) {
+                fieldValue = field.get(subfieldName);
+            }
+    }
+    return fieldValue;
+}
+
+public static void writeSummary(MarkupBuilder builder, StringWriter writer, String key, Map fields, Map renderedFields, MultivaluedMap queryParams) {
+	def wikiNote = true;	// assume tha 'X3 Release Note' field is as Wiki type
+
+	if (fields) {
+        // issuetype
+        String issuetype = ((Map) fields.get("issuetype")).get("name");
+		// summary and note
+        String summary, releaseNote;
+        if (issuetype == "Epic") {
+            // for Epic
+        	summary = fields.get("customfield_10801");	// Epic name
+            if (wikiNote) {
+        		releaseNote = renderedFields.get("customfield_14806");
+            } else {
+        		releaseNote = fields.get("customfield_14806");
+            }
+        } else {
+            // for Bug (behavior change)
+        	summary = fields.get("summary");
+        	releaseNote = fields.get("customfield_15118");	// X3 Solution Detail
+        }
+        // Comments (for POC, get the comment as the release note field)
+        if (false && releaseNote == "See comment") {
+            Map comment = renderedFields.get("comment");
+            if (comment) {
+                List comments = (List) comment.getAt("comments");
+                if (comments) {
+                    releaseNote = comments[0].getAt("body");
+                    wikiNote = true;
+                }
+            }
+        }
+
+        // Write into builder
+		String url = getJiraSageUrl(queryParams);
+		builder.div (key: "$key"){
+            if (queryParams.getFirst("type") == "internal") {
+                u {
+                    h5 {
+                        a (href:"$url/browse/$key", target: "_blank", "$summary [$key]")
+                    }
+                }
+            } else {
+				u {h5 summary}
+            }
+            if (wikiNote) {
+        		writer.append(releaseNote);
+            } else {
+            	p releaseNote
+            }
+        }
+	}
+}
+
+public static String getReleasenoteHeader() {
+    StringWriter builder = new StringWriter();
+    MarkupBuilder markupBuilder = new groovy.xml.MarkupBuilder(builder);
+        markupBuilder.head () {
+            //script (type: "text/javascript")
+            if (true) {
+            	// link rel: "Stylesheet", type: "text/css", media: "all", href: "http://online-help.sageerpx3.com/erp/99/wp-static-content/news/en_US/ReleaseNote_11/ADXHelp_main.css"
+            	link rel: "stylesheet", type: "text/css", media: "all", href: "ADXHelp_main.css"
+            } else {
+                // for example...
+                style {
+                    h1 color: "blue";
+                }
+            }
+        }
+	return builder.toString();
+}
+
+public static String getReleasenoteBodyIssue(String key, Map fields, Map renderedFields, MultivaluedMap queryParams) {
+    def builder = new StringWriter();
+    def markupBuilder = new MarkupBuilder(builder);
+    def writer = new StringWriter();
+	def wikiNote = (queryParams.getFirst("staging") == "yes");
+
+	if (fields) {
+        // issuetype
+        String issuetype = ((Map) fields.get("issuetype")).get("name");
+		// summary and note
+        String summary, releaseNote;
+        if (issuetype == "Epic") {
+            // Epic
+        	summary = fields.get("customfield_10801");
+            if (wikiNote) {
+        		releaseNote = renderedFields.get("customfield_14806");
+            } else {
+        		releaseNote = fields.get("customfield_14806");
+            }
+        } else {
+            // Bug
+        	summary = fields.get("summary");
+        	releaseNote = fields.get("customfield_15118");
+        }
+        if (releaseNote == "See comment") {
+            // Comments (for POC, get the comment as the release note field)
+            Map comment = renderedFields.get("comment");
+            if (comment) {
+                List comments = (List) comment.getAt("comments");
+                if (comments) {
+                    releaseNote = comments[0].getAt("body");
+                    wikiNote = true;
+                }
+            }
+        }
+		// Feature (inwardIssue, member of issuelinks)
+        String summaryFeature, keyFeature;
+        List issuelinks = (List) fields.getAt("issuelinks");
+        issuelinks.eachWithIndex {issuelink, idx ->
+            Map link = (Map) issuelink;
+            if (link) {
+                // "inward": "is part of"
+                Map type = (Map) link.get("type");
+                if (type && type.get("inward") == "is part of") {
+                    Map inwardIssue = (Map) link.get("inwardIssue");
+                    if (inwardIssue) {
+                        keyFeature = inwardIssue.get("key"); 
+                        Map field = inwardIssue.get("fields");
+                        if (field) {
+                            summaryFeature = field.get("summary");
+                        }
+                    }
+                }
+            }
+        }
+
+/*
+mkp.html{
+   head{ 
+      title "bijoy's groovy"
+   }
+   body{
+      div(style:"color:red"){
+         p "this is cool"
+      }
+   }
+}
+*/
+/*
+builder.html {     
+  head {         
+    title"XML encoding with Groovy"     
+  }     
+  body {
+    h1"XML encoding with Groovy"   
+    p"this format can be used as an alternative markup to XML"      
+
+    a(href:'http://groovy.codehaus.org', "Groovy")
+
+    p {
+      mkp.yield "This is some"
+      b"mixed"   
+      mkp.yield " text. For more see the"
+      a(href:'http://groovy.codehaus.org', "Groovy")
+      mkp.yield "project"    
+    }
+    p "some text"    
+  } 
+}
+*/
+        def backgroundColor = "transparent";
+        if (queryParams.getFirst("type") == "internal") {
+        	backgroundColor = "lightyellow";
+		}
+		String url = getJiraSageUrl(queryParams);
+
+        markupBuilder.div (style: "background-color:$backgroundColor", id:"$key") {
+            // title ('Heading')
+            if (queryParams.getFirst("onlylevel") == "yes") {
+                String productArea = ((Map) fields.get("customfield_15522")).get("value");
+                p "[$productArea][$issuetype][$key] $summary"
+            } else {
+                p {
+                    if (queryParams.getFirst("type") == "internal") {
+                        a (href:"$url/browse/$key", "$summary [$key]")
+                    } else {
+                        u summary
+                    }
+                }
+                if (!wikiNote) {
+                    p releaseNote
+                }
+                /* if (summaryFeature && summaryFeature != "") {p summaryFeature + " [JIRA#$keyFeature]"} */
+            }
+        }
+		// releaseNote is directly in html format
+        if (wikiNote) {
+            def wikireleaseNote;
+        	if (queryParams.getFirst("type") == "internal") {
+                wikireleaseNote = '<div style="background-color:lightblue">' + releaseNote + '</div>';
+            } else {
+                wikireleaseNote = releaseNote;
+            }
+			writer.append(wikireleaseNote);
+            // Video
+            if (key == "X3-22204") {
+            	writer.append('<video width="320" height="240" controls><source src="https://www.w3schools.com/tags/movie.mp4" type="video/mp4">Your browser does not support the video tag.</video>');
+            }
+        }
+    }
+
+    return builder.toString() + System.getProperty("line.separator") + writer.toString();
+}
+
+public static String headerDocument(String format) {
+	ReadmeBuilder builder = new ReadmeBuilder();
+    builder.addLine("All confidential information transmitted in this document is provided for information purposes solely and cannot be considered as complete.");
+    builder.addLine("The partner, user-customer or their sub-contractor receiving this confidential information undertakes:");
+    builder.addLine("- to keep it strictly confidential and neither to publish it nor to communicate it to third parties, including within the framework of legal procedures;");
+    builder.addLine("- not to use it directly or indirectly for personal purposes or for purposes other than those necessary to carry out their activities;");
+    builder.addLine("- to circulate it only to those employees needing to know them, after having previously informed said employees of the confidential nature of this information, the partner and user-customer guaranteeing that their employees and possible sub-contractors will comply with these confidentiality requirements;");
+    builder.addLine("- not to duplicate, copy or reproduce this confidential information.");
+    builder.addLine("Any breach of these provisions will compel the partner, user-customer or their sub-contractor to repair all damages, whatever their nature, undergone by Sage or a Third-Party on the basis of a claim lodged with Sage.");
+    builder.addLF();
+    
+    switch (format) {
+        case "text":
+  			return builder.build();
+        case "html":
+            StringWriter writer = new StringWriter();
+        	MarkupBuilder newBuilder = new MarkupBuilder(writer);
+        	newBuilder.p(builder.build());
+        	return writer.toString();
+    }
+}
+
+public static String pDocument(String paragraph, String format, String style) {
+	ReadmeBuilder builder = new ReadmeBuilder();
+    builder.addLine(paragraph);
+
+    switch (format) {
+        case "text":
+  			return builder.build();
+        case "html":
+    		StringWriter writer = new StringWriter();
+        	MarkupBuilder newBuilder = new MarkupBuilder(writer);
+            if (style) {
+                switch (style) {
+                    case "U":
+        				newBuilder.U(paragraph);
+                    	break;
+                }
+            } else {
+        		newBuilder.p(paragraph);
+            }
+        	return writer.toString();
+    }
+}
+
+public static String hDocument(String h, int level, String anchor, String pclass, String format) {
+	switch (format) {
+        case "text":
+			ReadmeBuilder builder = new ReadmeBuilder();
+        	String carUnderline;
+            switch (level) {
+				case 1: 
+                	carUnderline = "=";
+                	break;
+				case 2:
+                	carUnderline = "-";
+                	break;
+                default :
+                	carUnderline = "-";
+            }
+    		builder.addLF();
+    		builder.addLine(repeat(carUnderline, h.length()));
+    		builder.addLine(h);
+    		builder.addLine(repeat(carUnderline, h.length()));
+  			return builder.build();
+        case "html":
+    		StringWriter writer = new StringWriter();
+        	MarkupBuilder newBuilder = new MarkupBuilder(writer);
+        	newBuilder.a(name: anchor, "");
+            switch (level) {
+				case 1:
+        			newBuilder.h1(class: pclass, h);
+                	break;
+				case 2:
+        			newBuilder.h2(class: pclass, h);
+                	break;
+				case 3:
+        			newBuilder.h3(class: pclass, h);
+                	break;
+				case 4:
+        			newBuilder.h4(class: pclass, h);
+                	break;
+				case 5:
+        			newBuilder.h5(class: pclass, h);
+                	break;
+				case 6:
+        			newBuilder.h6(class: pclass, h);
+                	break;
+            }
+        	return writer.toString();
+    }
+}
+
+public static String divTag(String value) {
+
+	def hashmap = [Finance:['#MIS_10_Finance','Finance'], Distribution:['#MIS_10_Distribution','Distribution']];
+    def writer = new StringWriter();
+    def mkup = new MarkupBuilder(writer);
+    mkup.html {
+        div(id: "main") {
+            ul {
+                hashmap.collect {k, vList ->     
+                    li {a href: vList[0], vList[1]}
+                }
+            }
+        }
+    }
+    return writer.toString();
+
+}
+
+public static String h1Document(String h1, String format) {
+	ReadmeBuilder builder = new ReadmeBuilder();
+
+    switch (format) {
+        case "text":
+    		builder.addLF();
+    		builder.addLine(repeat("*", h1.length()));
+    		builder.addLine(h1);
+    		builder.addLine(repeat("*", h1.length()));
+  			return builder.build();
+        case "html":
+    		StringWriter writer = new StringWriter();
+        	MarkupBuilder newBuilder = new MarkupBuilder(writer);
+        	newBuilder.h1(h1);
+        	return writer.toString();
+    }
+}
+
+public static String h2Document(String h2, String format) {
+	ReadmeBuilder builder = new ReadmeBuilder();
+
+    switch (format) {
+        case "text":
+    		builder.addLF();
+    		builder.addLine(repeat("=", h2.length()));
+    		builder.addLine(h2);
+    		builder.addLine(repeat("=", h2.length()));
+  			return builder.build();
+        case "html":
+    		StringWriter writer = new StringWriter();
+        	MarkupBuilder newBuilder = new MarkupBuilder(writer);
+        	newBuilder.h2(h2);
+        	return writer.toString();
+    }
+}
+
+public static String h3Document(String h3, String text, String summary, String format) {
+	ReadmeBuilder builder = new ReadmeBuilder();
+
+    switch (format) {
+        case "text":
+    		builder.addLF();
+    		builder.addLine(text);
+    		builder.addLine(repeat("-", text.length()));
+  			return builder.build();
+        case "html":
+        	StringWriter writer = new StringWriter();
+			MarkupBuilder newBuilder = new MarkupBuilder(writer);
+        	newBuilder.p(newBuilder.a(href: h3, text) + " " + summary);
+			return writer.toString();
+    }
+}
+
+public static String hrefDocument(String href, String text, String format) {
+	ReadmeBuilder builder = new ReadmeBuilder();
+
+    switch (format) {
+        case "text":
+    		builder.append(" ("+href+")");
+  			return builder.build();
+        case "html":
+    		StringWriter writer = new StringWriter();
+        	MarkupBuilder newBuilder = new MarkupBuilder(writer);
+        	newBuilder.a(href: href, text);
+    		// builder.append("<br>");
+        	return writer.toString();
+    }
+}
+
+public static String footerDocument(String format) {
+	ReadmeBuilder builder = new ReadmeBuilder();
+    String footer = "End of report";
+    
+    switch (format) {
+        case "text":
+    		builder.addLF();
+    		builder.addLine(footer);
+  			return builder.build();
+        case "html":
+    		builder.addLine("");
+            StringWriter writer = new StringWriter();
+        	MarkupBuilder newBuilder = new MarkupBuilder(writer);
+        	newBuilder.p(builder.build());
+        	return writer.toString();
+    }
+}
+
+/*
+*/
+class ReadmeBuilder {
+    private StringWriter script = new StringWriter()
+
+    public ReadmeBuilder append(final String scriptLine) {
+        script.append(scriptLine)
+        return this
+    }
+
+    public ReadmeBuilder addLine(final String scriptLine) {
+        script.append(scriptLine)
+        script.append(newLine())
+        return this
+    }
+
+    public ReadmeBuilder addLF() {
+        script.append(newLine())
+        return this
+    }
+
+    public ReadmeBuilder addFF() {
+        script.append("\f")
+        return this
+    }
+
+    private String newLine() {
+        return System.getProperty("line.separator")
+    }
+
+    public String build() {
+        return script.toString()
+    }
+}
+
+/*
+*/
+class QueryString {
+
+  private String query;
+
+  public QueryString(String base, String api) {
+    query = base + api;
+  }
+
+  public void add(String name, String value) {
+    query += "&";
+    encode(name, value);
+  }
+
+  private void encode(String name, String value) {
+    try {
+      query += URLEncoder.encode(name, "UTF-8");
+      query += "=";
+      query += URLEncoder.encode(value, "UTF-8");
+    } catch (UnsupportedEncodingException ex) {
+      throw new RuntimeException("Broken VM does not support UTF-8");
+    }
+  }
+
+  public String getQuery() {
+    return query;
+  }
+
+  public String toString() {
+    return getQuery();
+  }
+
+}
+
+/*
+*/
+public class JiraFilter {
+	private String jql = null;
+    private String errorMessage = null;
+    private int httpResponse;
+
+	public JiraFilter(String filterId) {
+	    BodyResponse myResponse = new BodyResponse("https://jira-sage.valiantyscloud.net/rest/api/2", "/filter", "/"+filterId);
+        this.httpResponse = myResponse.getHttpCode();
+        if (myResponse.getHttpCode().equals(200)) {
+            def jsonSlurper = new groovy.json.JsonSlurper();
+            Map jsonResult = (Map) jsonSlurper.parseText(myResponse.getBody());
+            this.jql = jsonResult.get("jql");
+        } else {
+        	this.errorMessage = myResponse.getErrorMessage();
+        }
+    }
+
+    public boolean isValidFilter() {
+      	return (this.httpResponse == 200);
+   	}
+
+    public String getJql() {
+      	return this.jql;
+   	}
+
+    public String getErrorMessage() {
+      	return this.errorMessage;
+   	}
+}
+
+/*
+@see https://jira-sage.valiantyscloud.net/rest/api/2/issue/<issuekey>/properties/changedfiles
+*/
+public class ChangedFiles {
+	private ArrayList files = new ArrayList();
+    private String errorMessage = null;
+    private int httpResponse;
+
+	public ChangedFiles(String issueKey) {
+	    BodyResponse myResponse = new BodyResponse("https://jira-sage.valiantyscloud.net/rest/api/2", "/issue", "/"+issueKey+"/properties/changedfiles");
+        this.httpResponse = myResponse.getHttpCode();
+        if (myResponse.getHttpCode().equals(200)) {
+            def jsonSlurper = new groovy.json.JsonSlurper();
+            Map jsonResult = (Map) jsonSlurper.parseText(myResponse.getBody());
+            Map valueMap = jsonResult.get("value");
+            List commitsList = valueMap.get("commits");
+            if (commitsList) {
+                commitsList.each {
+            		Map commit = (Map) it;
+            		List filesList = commit.get("files");
+                    if (filesList) {
+                		filesList.each {
+            				Map file = (Map) it;
+                    		this.files.add(file.get("filename"));
+                        }
+                    }
+                }
+            }
+
+        } else {
+        	this.errorMessage = myResponse.getErrorMessage();
+        }
+    }
+
+    public boolean asChangedFiles() {
+      	return (this.httpResponse == 200);
+   	}
+
+    public ArrayList getFiles() {
+      	return this.files;
+   	}
+
+    public String getErrorMessage() {
+      	return this.errorMessage;
+   	}
+}
+
+/*
+*/
+public class BodyResponse {
+    private HttpURLConnection connection;
+
+	public BodyResponse(String baseURL, String API, String query) {
+        def bodyResponse, typeResponse;
+        URL url = new java.net.URL(baseURL + API + query);
+
+        def authString = "INDUSPRD" + ":" + "INDUSPRD";
+        byte[] authEncBytes = Base64.encodeBase64(authString.getBytes());
+        String authStringEnc = new String(authEncBytes);
+        connection = (HttpURLConnection) url.openConnection();
+        // connection.setRequestProperty("Authorization", "Basic " + authStringEnc);
+    	connection.setRequestProperty("Authorization", buildBasicAuthorizationString("INDUSPRD", "INDUSPRD"));
+        connection.setRequestProperty("Content-Type", "application/json");
+        connection.setRequestMethod("GET");
+        connection.connect();
+    }
+
+    public int getHttpCode() {
+      	return connection.getResponseCode();
+   	}
+
+    public String getBody() {
+      	return connection.getInputStream().getText();
+   	}
+
+    public String getErrorMessage() {
+        def jsonSlurper = new groovy.json.JsonSlurper();
+        Map jsonResult = (Map) jsonSlurper.parseText(connection.getErrorStream().getText());
+        List messages = (List) jsonResult.get("errorMessages");
+        return messages[0];
+   	}
+
+    private String buildBasicAuthorizationString(String username, String password) {
+
+        String credentials = username + ":" + password;
+        return "Basic " + new String(new Base64().encode(credentials.getBytes()));
+    }
+}
+
+public class Release {
+    private String name;
+    private String month;
+    private String href;
+
+    public String getName() {
+      	return name;
+   	}
+	public String getMonth() {
+      	return month;
+   	}
+    public String getHref() {
+      	return href;
+    }
+}
+
+public class ProductArea {
+    private String name;
+    private String href;
+    private boolean present;
+
+	public String getName() {
+      	return name;
+   	}
+    public String getHref() {
+      	return href;
+    }
+    public void setPresent(boolean value) {
+		present = value;
+    }
+    public boolean isPresent() {
+      	return present;
+    }
+    public void resetPresent() {
+		present = false;
+    }
+}
+
+class Person {
+    String name
+    int age
+}
+
+/** 
+* Copy a file from source to destination. 
+* 
+* @param source the source 
+* @param destination the destination 
+* @return True if succeeded , False if not 
+*/ 
+public static boolean copy(InputStream source, String destination) {
+    boolean succeess = true;
+
+	try { 
+    	Files.copy(source, Paths.get(destination), StandardCopyOption.REPLACE_EXISTING);
+	} catch (IOException ex) {
+    	succeess = false;
+	} 
+
+return succeess;
+
+} 
 
 public static void writeStyle(MarkupBuilder builder) {
     builder.style (type:"text/css", '''
@@ -1627,759 +2484,4 @@ div#container table {
     color: #434343;}
 }	
 ''')
-}
-
-public static boolean writeHeaders(MarkupBuilder builder, Map breakField, Map fields, MultivaluedMap queryParams, Release release, List<ProductArea> productAreas) {
-    String breakFieldName = breakField.getAt("field");
-    Map breakSubfield = (Map) breakField.getAt("subfield");
-
-	// Get the last breakfield value
-    String breakValue = breakSubfield.getAt("breakValue");
-    // Get the field value
-    String fieldValue = getFieldValue(breakFieldName, breakSubfield, fields, release.getName())
-
-	if (fieldValue != breakValue) {
-        // Update the last break value
-        breakSubfield.putAt("breakValue", fieldValue);
-
-		// Write the value of the break field
-        Integer level = ((String) breakField.getAt("head")).toInteger();
-        String headerClass = breakField.getAt("class");
-        // Search the href of current 'X3 Product Area'
-        String anchor;
-        switch (breakFieldName) {
-            case "customfield_15522":
-            	// Get the anchor
-                ProductArea productArea = productAreas.find {it.getName() == fieldValue};
-                if (productArea) {
-                    anchor = productArea.getHref();
-                }
-                break;
-            case "issuetype":
-            	// Change Bug to CHANGES and Epic to FEATURES
-                if (fieldValue == "Bug") {
-                    fieldValue = "CHANGES";
-                } else if (fieldValue == "Epic") {
-                    fieldValue = "FEATURES";
-                }
-            	break;
-            default :
-            	anchor = "";
-        }
-		switch (level) {
-            case 1:
-            builder.h1 (class: headerClass, id: anchor, fieldValue)
-            break;
-            case 2:
-            builder.h2 (class: headerClass, id: anchor, fieldValue)
-            break;
-            case 3:
-            builder.h3 (class: headerClass, id: anchor, fieldValue)
-            break;
-            case 4:
-            builder.h4 (class: headerClass, id: anchor, fieldValue)
-            break;
-            case 5:
-            // builder.h5 (class: headerClass, id: anchor, fieldValue)
-            builder.u {
-            	h5 (class: headerClass, id: anchor, fieldValue)
-            }
-            break;
-        }
-        return true;
-	} else {
-        return false;
-    }
-}
-
-/*
-Reset break fields values
-*/
-public static void resetBreakFieldsValue(List breakFields, int idx) {
-    def followingBreaks = breakFields.findAll {((int) it.getAt("item")) > idx};
-        if (followingBreaks) {
-            followingBreaks.each {
-                Map breakSubfield = (Map) it.getAt("subfield");
-                if (breakSubfield) {
-                    // p ("!Reset $idx " + it.getAt("field") +"/"+ breakSubfield.getAt("breakValue"))
-                    breakSubfield.putAt("breakValue", "#");
-                }
-            }
-        } // end Reset
-}
-
-
-/*
-Get the value property of a field
-*/
-private static String getFieldValue(String breakFieldName, Map breakSubfield, Map fields, String release) {
-    String fieldValue;
-    switch (breakFieldName) {
-        case "fixVersions":
-            List fixVersions = (List) fields.getAt(breakFieldName);
-            fixVersions.each {
-                Map fixVersion = (Map) it;
-                if (fixVersion) {
-                    String name = fixVersion.get("name");
-                    if (name.indexOf(release) >= 0) {
-                        fieldValue = name;
-                        return;
-                    }
-                }
-            }
-        	break;
-        default :
-            Map field = fields.get(breakFieldName);
-            if (field) {
-                fieldValue = field.get(breakSubfield.getAt("name"));
-            }
-    }
-    return fieldValue;
-}
-
-public static void writeSummary(MarkupBuilder builder, StringWriter writer, String key, Map fields, Map renderedFields, MultivaluedMap queryParams) {
-	def wikiNote = (queryParams.getFirst("staging") == "yes");
-
-	if (fields) {
-        // issuetype
-        String issuetype = ((Map) fields.get("issuetype")).get("name");
-		// summary and note
-        String summary, releaseNote;
-        if (issuetype == "Epic") {
-            // for Epic
-        	summary = fields.get("customfield_10801");	// Epic name
-            if (wikiNote) {
-        		releaseNote = renderedFields.get("customfield_14806");
-            } else {
-        		releaseNote = fields.get("customfield_14806");
-            }
-        } else {
-            // for Bug (behavior change)
-        	summary = fields.get("summary");
-        	releaseNote = fields.get("customfield_15118");	// X3 Solution Detail
-        }
-        // Comments (for POC, get the comment as the release note field)
-        if (releaseNote == "See comment") {
-            Map comment = renderedFields.get("comment");
-            if (comment) {
-                List comments = (List) comment.getAt("comments");
-                if (comments) {
-                    releaseNote = comments[0].getAt("body");
-                    wikiNote = true;
-                }
-            }
-        }
-
-        // Write into builder
-		String url = getJiraSageUrl(queryParams);
-		builder.div (key: "$key"){
-            if (queryParams.getFirst("type") == "internal") {
-                u {
-                    h5 {
-                        a (href:"$url/browse/$key", target: "_blank", "$summary [$key]")
-                    }
-                }
-            } else {
-				u {h5 summary}
-            }
-            if (wikiNote) {
-        		writer.append(releaseNote);
-            } else {
-            	p releaseNote
-            }
-        }
-	}
-}
-
-public static String getReleasenoteHeader() {
-    StringWriter builder = new StringWriter();
-    MarkupBuilder markupBuilder = new groovy.xml.MarkupBuilder(builder);
-        markupBuilder.head () {
-            //script (type: "text/javascript")
-            if (true) {
-            	// link rel: "Stylesheet", type: "text/css", media: "all", href: "http://online-help.sageerpx3.com/erp/99/wp-static-content/news/en_US/ReleaseNote_11/ADXHelp_main.css"
-            	link rel: "stylesheet", type: "text/css", media: "all", href: "ADXHelp_main.css"
-            } else {
-                // for example...
-                style {
-                    h1 color: "blue";
-                }
-            }
-        }
-	return builder.toString();
-}
-
-public static String getReleasenoteBodyIssue(String key, Map fields, Map renderedFields, MultivaluedMap queryParams) {
-    def builder = new StringWriter();
-    def markupBuilder = new MarkupBuilder(builder);
-    def writer = new StringWriter();
-	def wikiNote = (queryParams.getFirst("staging") == "yes");
-
-	if (fields) {
-        // issuetype
-        String issuetype = ((Map) fields.get("issuetype")).get("name");
-		// summary and note
-        String summary, releaseNote;
-        if (issuetype == "Epic") {
-            // Epic
-        	summary = fields.get("customfield_10801");
-            if (wikiNote) {
-        		releaseNote = renderedFields.get("customfield_14806");
-            } else {
-        		releaseNote = fields.get("customfield_14806");
-            }
-        } else {
-            // Bug
-        	summary = fields.get("summary");
-        	releaseNote = fields.get("customfield_15118");
-        }
-        if (releaseNote == "See comment") {
-            // Comments (for POC, get the comment as the release note field)
-            Map comment = renderedFields.get("comment");
-            if (comment) {
-                List comments = (List) comment.getAt("comments");
-                if (comments) {
-                    releaseNote = comments[0].getAt("body");
-                    wikiNote = true;
-                }
-            }
-        }
-		// Feature (inwardIssue, member of issuelinks)
-        String summaryFeature, keyFeature;
-        List issuelinks = (List) fields.getAt("issuelinks");
-        issuelinks.eachWithIndex {issuelink, idx ->
-            Map link = (Map) issuelink;
-            if (link) {
-                // "inward": "is part of"
-                Map type = (Map) link.get("type");
-                if (type && type.get("inward") == "is part of") {
-                    Map inwardIssue = (Map) link.get("inwardIssue");
-                    if (inwardIssue) {
-                        keyFeature = inwardIssue.get("key"); 
-                        Map field = inwardIssue.get("fields");
-                        if (field) {
-                            summaryFeature = field.get("summary");
-                        }
-                    }
-                }
-            }
-        }
-
-/*
-mkp.html{
-   head{ 
-      title "bijoy's groovy"
-   }
-   body{
-      div(style:"color:red"){
-         p "this is cool"
-      }
-   }
-}
-*/
-/*
-builder.html {     
-  head {         
-    title"XML encoding with Groovy"     
-  }     
-  body {
-    h1"XML encoding with Groovy"   
-    p"this format can be used as an alternative markup to XML"      
-
-    a(href:'http://groovy.codehaus.org', "Groovy")
-
-    p {
-      mkp.yield "This is some"
-      b"mixed"   
-      mkp.yield " text. For more see the"
-      a(href:'http://groovy.codehaus.org', "Groovy")
-      mkp.yield "project"    
-    }
-    p "some text"    
-  } 
-}
-*/
-        def backgroundColor = "transparent";
-        if (queryParams.getFirst("type") == "internal") {
-        	backgroundColor = "lightyellow";
-		}
-		String url = getJiraSageUrl(queryParams);
-
-        markupBuilder.div (style: "background-color:$backgroundColor", id:"$key") {
-            // title ('Heading')
-            if (queryParams.getFirst("onlylevel") == "yes") {
-                String productArea = ((Map) fields.get("customfield_15522")).get("value");
-                p "[$productArea][$issuetype][$key] $summary"
-            } else {
-                p {
-                    if (queryParams.getFirst("type") == "internal") {
-                        a (href:"$url/browse/$key", "$summary [$key]")
-                    } else {
-                        u summary
-                    }
-                }
-                if (!wikiNote) {
-                    p releaseNote
-                }
-                /* if (summaryFeature && summaryFeature != "") {p summaryFeature + " [JIRA#$keyFeature]"} */
-            }
-        }
-		// releaseNote is directly in html format
-        if (wikiNote) {
-            def wikireleaseNote;
-        	if (queryParams.getFirst("type") == "internal") {
-                wikireleaseNote = '<div style="background-color:lightblue">' + releaseNote + '</div>';
-            } else {
-                wikireleaseNote = releaseNote;
-            }
-			writer.append(wikireleaseNote);
-            // Video
-            if (key == "X3-22204") {
-            	writer.append('<video width="320" height="240" controls><source src="https://www.w3schools.com/tags/movie.mp4" type="video/mp4">Your browser does not support the video tag.</video>');
-            }
-        }
-    }
-
-    return builder.toString() + System.getProperty("line.separator") + writer.toString();
-}
-
-public static String headerDocument(String format) {
-	ReadmeBuilder builder = new ReadmeBuilder();
-    builder.addLine("All confidential information transmitted in this document is provided for information purposes solely and cannot be considered as complete.");
-    builder.addLine("The partner, user-customer or their sub-contractor receiving this confidential information undertakes:");
-    builder.addLine("- to keep it strictly confidential and neither to publish it nor to communicate it to third parties, including within the framework of legal procedures;");
-    builder.addLine("- not to use it directly or indirectly for personal purposes or for purposes other than those necessary to carry out their activities;");
-    builder.addLine("- to circulate it only to those employees needing to know them, after having previously informed said employees of the confidential nature of this information, the partner and user-customer guaranteeing that their employees and possible sub-contractors will comply with these confidentiality requirements;");
-    builder.addLine("- not to duplicate, copy or reproduce this confidential information.");
-    builder.addLine("Any breach of these provisions will compel the partner, user-customer or their sub-contractor to repair all damages, whatever their nature, undergone by Sage or a Third-Party on the basis of a claim lodged with Sage.");
-    builder.addLF();
-    
-    switch (format) {
-        case "text":
-  			return builder.build();
-        case "html":
-            StringWriter writer = new StringWriter();
-        	MarkupBuilder newBuilder = new MarkupBuilder(writer);
-        	newBuilder.p(builder.build());
-        	return writer.toString();
-    }
-}
-
-public static String pDocument(String paragraph, String format, String style) {
-	ReadmeBuilder builder = new ReadmeBuilder();
-    builder.addLine(paragraph);
-
-    switch (format) {
-        case "text":
-  			return builder.build();
-        case "html":
-    		StringWriter writer = new StringWriter();
-        	MarkupBuilder newBuilder = new MarkupBuilder(writer);
-            if (style) {
-                switch (style) {
-                    case "U":
-        				newBuilder.U(paragraph);
-                    	break;
-                }
-            } else {
-        		newBuilder.p(paragraph);
-            }
-        	return writer.toString();
-    }
-}
-
-public static String hDocument(String h, int level, String anchor, String pclass, String format) {
-	switch (format) {
-        case "text":
-			ReadmeBuilder builder = new ReadmeBuilder();
-        	String carUnderline;
-            switch (level) {
-				case 1: 
-                	carUnderline = "=";
-                	break;
-				case 2:
-                	carUnderline = "-";
-                	break;
-                default :
-                	carUnderline = "-";
-            }
-    		builder.addLF();
-    		builder.addLine(repeat(carUnderline, h.length()));
-    		builder.addLine(h);
-    		builder.addLine(repeat(carUnderline, h.length()));
-  			return builder.build();
-        case "html":
-    		StringWriter writer = new StringWriter();
-        	MarkupBuilder newBuilder = new MarkupBuilder(writer);
-        	newBuilder.a(name: anchor, "");
-            switch (level) {
-				case 1:
-        			newBuilder.h1(class: pclass, h);
-                	break;
-				case 2:
-        			newBuilder.h2(class: pclass, h);
-                	break;
-				case 3:
-        			newBuilder.h3(class: pclass, h);
-                	break;
-				case 4:
-        			newBuilder.h4(class: pclass, h);
-                	break;
-				case 5:
-        			newBuilder.h5(class: pclass, h);
-                	break;
-				case 6:
-        			newBuilder.h6(class: pclass, h);
-                	break;
-            }
-        	return writer.toString();
-    }
-}
-
-public static String divTag(String value) {
-
-	def hashmap = [Finance:['#MIS_10_Finance','Finance'], Distribution:['#MIS_10_Distribution','Distribution']];
-    def writer = new StringWriter();
-    def mkup = new MarkupBuilder(writer);
-    mkup.html {
-        div(id: "main") {
-            ul {
-                hashmap.collect {k, vList ->     
-                    li {a href: vList[0], vList[1]}
-                }
-            }
-        }
-    }
-    return writer.toString();
-
-}
-
-public static String h1Document(String h1, String format) {
-	ReadmeBuilder builder = new ReadmeBuilder();
-
-    switch (format) {
-        case "text":
-    		builder.addLF();
-    		builder.addLine(repeat("*", h1.length()));
-    		builder.addLine(h1);
-    		builder.addLine(repeat("*", h1.length()));
-  			return builder.build();
-        case "html":
-    		StringWriter writer = new StringWriter();
-        	MarkupBuilder newBuilder = new MarkupBuilder(writer);
-        	newBuilder.h1(h1);
-        	return writer.toString();
-    }
-}
-
-public static String h2Document(String h2, String format) {
-	ReadmeBuilder builder = new ReadmeBuilder();
-
-    switch (format) {
-        case "text":
-    		builder.addLF();
-    		builder.addLine(repeat("=", h2.length()));
-    		builder.addLine(h2);
-    		builder.addLine(repeat("=", h2.length()));
-  			return builder.build();
-        case "html":
-    		StringWriter writer = new StringWriter();
-        	MarkupBuilder newBuilder = new MarkupBuilder(writer);
-        	newBuilder.h2(h2);
-        	return writer.toString();
-    }
-}
-
-public static String h3Document(String h3, String text, String summary, String format) {
-	ReadmeBuilder builder = new ReadmeBuilder();
-
-    switch (format) {
-        case "text":
-    		builder.addLF();
-    		builder.addLine(text);
-    		builder.addLine(repeat("-", text.length()));
-  			return builder.build();
-        case "html":
-        	StringWriter writer = new StringWriter();
-			MarkupBuilder newBuilder = new MarkupBuilder(writer);
-        	newBuilder.p(newBuilder.a(href: h3, text) + " " + summary);
-			return writer.toString();
-    }
-}
-
-public static String hrefDocument(String href, String text, String format) {
-	ReadmeBuilder builder = new ReadmeBuilder();
-
-    switch (format) {
-        case "text":
-    		builder.append(" ("+href+")");
-  			return builder.build();
-        case "html":
-    		StringWriter writer = new StringWriter();
-        	MarkupBuilder newBuilder = new MarkupBuilder(writer);
-        	newBuilder.a(href: href, text);
-    		// builder.append("<br>");
-        	return writer.toString();
-    }
-}
-
-public static String footerDocument(String format) {
-	ReadmeBuilder builder = new ReadmeBuilder();
-    String footer = "End of report";
-    
-    switch (format) {
-        case "text":
-    		builder.addLF();
-    		builder.addLine(footer);
-  			return builder.build();
-        case "html":
-    		builder.addLine("");
-            StringWriter writer = new StringWriter();
-        	MarkupBuilder newBuilder = new MarkupBuilder(writer);
-        	newBuilder.p(builder.build());
-        	return writer.toString();
-    }
-}
-
-/*
-*/
-class ReadmeBuilder {
-    private StringWriter script = new StringWriter()
-
-    public ReadmeBuilder append(final String scriptLine) {
-        script.append(scriptLine)
-        return this
-    }
-
-    public ReadmeBuilder addLine(final String scriptLine) {
-        script.append(scriptLine)
-        script.append(newLine())
-        return this
-    }
-
-    public ReadmeBuilder addLF() {
-        script.append(newLine())
-        return this
-    }
-
-    public ReadmeBuilder addFF() {
-        script.append("\f")
-        return this
-    }
-
-    private String newLine() {
-        return System.getProperty("line.separator")
-    }
-
-    public String build() {
-        return script.toString()
-    }
-}
-
-/*
-*/
-class QueryString {
-
-  private String query;
-
-  public QueryString(String base, String api) {
-    query = base + api;
-  }
-
-  public void add(String name, String value) {
-    query += "&";
-    encode(name, value);
-  }
-
-  private void encode(String name, String value) {
-    try {
-      query += URLEncoder.encode(name, "UTF-8");
-      query += "=";
-      query += URLEncoder.encode(value, "UTF-8");
-    } catch (UnsupportedEncodingException ex) {
-      throw new RuntimeException("Broken VM does not support UTF-8");
-    }
-  }
-
-  public String getQuery() {
-    return query;
-  }
-
-  public String toString() {
-    return getQuery();
-  }
-
-}
-
-/*
-*/
-public class JiraFilter {
-	private String jql = null;
-    private String errorMessage = null;
-    private int httpResponse;
-
-	public JiraFilter(String filterId) {
-	    BodyResponse myResponse = new BodyResponse("https://jira-sage.valiantyscloud.net/rest/api/2", "/filter", "/"+filterId);
-        this.httpResponse = myResponse.getHttpCode();
-        if (myResponse.getHttpCode().equals(200)) {
-            def jsonSlurper = new groovy.json.JsonSlurper();
-            Map jsonResult = (Map) jsonSlurper.parseText(myResponse.getBody());
-            this.jql = jsonResult.get("jql");
-        } else {
-        	this.errorMessage = myResponse.getErrorMessage();
-        }
-    }
-
-    public boolean isValidFilter() {
-      	return (this.httpResponse == 200);
-   	}
-
-    public String getJql() {
-      	return this.jql;
-   	}
-
-    public String getErrorMessage() {
-      	return this.errorMessage;
-   	}
-}
-
-/*
-@see https://jira-sage.valiantyscloud.net/rest/api/2/issue/<issuekey>/properties/changedfiles
-*/
-public class ChangedFiles {
-	private ArrayList files = new ArrayList();
-    private String errorMessage = null;
-    private int httpResponse;
-
-	public ChangedFiles(String issueKey) {
-	    BodyResponse myResponse = new BodyResponse("https://jira-sage.valiantyscloud.net/rest/api/2", "/issue", "/"+issueKey+"/properties/changedfiles");
-        this.httpResponse = myResponse.getHttpCode();
-        if (myResponse.getHttpCode().equals(200)) {
-            def jsonSlurper = new groovy.json.JsonSlurper();
-            Map jsonResult = (Map) jsonSlurper.parseText(myResponse.getBody());
-            Map valueMap = jsonResult.get("value");
-            List commitsList = valueMap.get("commits");
-            if (commitsList) {
-                commitsList.each {
-            		Map commit = (Map) it;
-            		List filesList = commit.get("files");
-                    if (filesList) {
-                		filesList.each {
-            				Map file = (Map) it;
-                    		this.files.add(file.get("filename"));
-                        }
-                    }
-                }
-            }
-
-        } else {
-        	this.errorMessage = myResponse.getErrorMessage();
-        }
-    }
-
-    public boolean asChangedFiles() {
-      	return (this.httpResponse == 200);
-   	}
-
-    public ArrayList getFiles() {
-      	return this.files;
-   	}
-
-    public String getErrorMessage() {
-      	return this.errorMessage;
-   	}
-}
-
-/*
-*/
-public class BodyResponse {
-    private HttpURLConnection connection;
-
-	public BodyResponse(String baseURL, String API, String query) {
-        def bodyResponse, typeResponse;
-        URL url = new java.net.URL(baseURL + API + query);
-
-        def authString = "INDUSPRD" + ":" + "INDUSPRD";
-        byte[] authEncBytes = Base64.encodeBase64(authString.getBytes());
-        String authStringEnc = new String(authEncBytes);
-        connection = (HttpURLConnection) url.openConnection();
-        // connection.setRequestProperty("Authorization", "Basic " + authStringEnc);
-    	connection.setRequestProperty("Authorization", buildBasicAuthorizationString("INDUSPRD", "INDUSPRD"));
-        connection.setRequestProperty("Content-Type", "application/json");
-        connection.setRequestMethod("GET");
-        connection.connect();
-    }
-
-    public int getHttpCode() {
-      	return connection.getResponseCode();
-   	}
-
-    public String getBody() {
-      	return connection.getInputStream().getText();
-   	}
-
-    public String getErrorMessage() {
-        def jsonSlurper = new groovy.json.JsonSlurper();
-        Map jsonResult = (Map) jsonSlurper.parseText(connection.getErrorStream().getText());
-        List messages = (List) jsonResult.get("errorMessages");
-        return messages[0];
-   	}
-
-    private String buildBasicAuthorizationString(String username, String password) {
-
-        String credentials = username + ":" + password;
-        return "Basic " + new String(new Base64().encode(credentials.getBytes()));
-    }
-}
-
-public class Release {
-    private String name;
-    private String month;
-    private String href;
-
-    public String getName() {
-      	return name;
-   	}
-	public String getMonth() {
-      	return month;
-   	}
-    public String getHref() {
-      	return href;
-    }
-}
-
-public class ProductArea {
-    private String name;
-    private String href;
-
-	public String getName() {
-      	return name;
-   	}
-    public String getHref() {
-      	return href;
-    }
-}
-
-class Person {
-    String name
-    int age
-}
-
-/** 
-* Copy a file from source to destination. 
-* 
-* @param source the source 
-* @param destination the destination 
-* @return True if succeeded , False if not 
-*/ 
-public static boolean copy(InputStream source, String destination) {
-    boolean succeess = true;
-
-	try { 
-    	Files.copy(source, Paths.get(destination), StandardCopyOption.REPLACE_EXISTING);
-	} catch (IOException ex) {
-    	succeess = false;
-	} 
-
-return succeess;
 }
